@@ -1,17 +1,26 @@
+// PostModel.swift
 import Foundation
 import FirebaseFirestore
 import FirebaseFirestore
 
-struct Post: Identifiable, Codable {
+struct PostModel: Identifiable, Codable {
     @DocumentID var id: String?
     var userId: String
-    var imageUrl: String
+    var username: String
+    var location: String
     var title: String
     var labels: [String]
-    var musicTitle: String
-    var musicArtist: String
-    var comment: String
-    var timestamp: Date
-    var latitude: Double       // ✅ now included
-    var longitude: Double      // ✅ now included
+    var specialInstruction: String
+    var music: MusicInfo
+    var upvotes: Int
+    var downvotes: Int
+    var imageUrl: String
+    var createdAt: Date?
+    var latitude: Double?
+    var longitude: Double?
+}
+
+struct MusicInfo: Codable {
+    var title: String
+    var artist: String
 }

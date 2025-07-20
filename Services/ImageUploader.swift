@@ -1,6 +1,7 @@
 
 import Foundation
 import FirebaseStorage
+import UIKit
 
 class ImageUploader {
     static let shared = ImageUploader()

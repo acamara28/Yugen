@@ -1,31 +1,28 @@
-
 import SwiftUI
-import AVFoundation
 
-struct CameraView: UIViewControllerRepresentable {
-    @Binding var capturedImage: UIImage?
+struct CameraPageView: View {
+    @State private var capturedImage: UIImage?
+    @State private var showConfirmation = false
 
-    func makeCoordinator() -> Coordinator {
-        return Coordinator(parent: self)
-    }
+    var body: some View {
+        VStack(spacing: 20) {
+            if let image = capturedImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .cornerRadius(12)
+                    .padding()
 
-    func makeUIViewController(context: Context) -> CameraViewController {
-        let controller = CameraViewController()
-        controller.delegate = context.coordinator
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: CameraViewController, context: Context) {}
-
-    class Coordinator: NSObject, CameraViewControllerDelegate {
-        var parent: CameraView
-
-        init(parent: CameraView) {
-            self.parent = parent
+                Button("Retake Photo") {
+                    capturedImage = nil
+                }
+                .foregroundColor(.red)
+            } else {
+                CameraView(capturedImage: $capturedImage)
+                    .edgesIgnoringSafeArea(.all)
+            }
         }
-
-        func didCapturePhoto(_ image: UIImage) {
-            parent.capturedImage = image
-        }
+        .navigationTitle("Camera")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

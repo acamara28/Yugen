@@ -1,55 +1,62 @@
 import SwiftUI
-import SDWebImageSwiftUI
-import FirebaseFirestore
 
 struct PostDetailView: View {
-    let post: ScenicPost
-
-    @State private var averageRating: Double?
-    @State private var isLoading: Bool = true
+    let post: PostModel
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-
-                // Full Image
-                WebImage(url: URL(string: post.imageUrl))
-                    .resizable()
-                    .indicator(.activity)
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .cornerRadius(12)
-
-                // Labels
-                HStack {
-                    ForEach(post.labels, id: \.self) { label in
-                        Text(label)
-                            .padding(8)
-                            .background(Color.black.opacity(0.1))
-                            .cornerRadius(8)
+                if let url = URL(string: post.imageUrl) {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .cornerRadius(12)
+                    } placeholder: {
+                        ProgressView()
                     }
                 }
 
-                // Song
-                if !post.musicTitle.isEmpty || !post.musicArtist.isEmpty {
+                Text(post.title)
+                    .font(.title)
+                    .bold()
+
+                Text("📍 Location: \(post.location)")
+                    .font(.subheadline)
+
+                if !post.labels.isEmpty {
                     HStack {
-                        Image(systemName: "music.note")
-                        Text("\(post.musicTitle) - \(post.musicArtist)")
-                            .font(.subheadline)
+                        ForEach(post.labels, id: \.self) { label in
+                            Text(label)
+                                .font(.caption)
+                                .padding(6)
+                                .background(Color.blue.opacity(0.2))
+                                .cornerRadius(6)
+                        }
                     }
                 }
 
-                // Comment / Memory
-                Text(post.comment)
+                Text("📝 Instructions: \(post.specialInstruction)")
                     .font(.body)
 
-                // Timestamp (optional display)
-                Text("Posted on \(post.timestamp.formatted(.dateTime.month().day().year()))")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                Text("🎶 Song: \(post.music.title) - \(post.music.artist)")
+                    .font(.footnote)
+
+                HStack {
+                    Text("👍 \(post.upvotes)")
+                    Text("👎 \(post.downvotes)")
+                }
+                .font(.footnote)
+                .foregroundColor(.gray)
+
+                if let createdAt = post.createdAt {
+                    Text("🕒 Posted on \(createdAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
             .padding()
         }
+        .navigationTitle("Post Details")
     }
 }
