@@ -1,9 +1,7 @@
-// PostModel.swift
 import Foundation
 import FirebaseFirestore
-import FirebaseFirestore
 
-struct PostModel: Identifiable, Codable {
+struct PostModel: Identifiable, Codable, Equatable {
     @DocumentID var id: String?
     var userId: String
     var username: String
@@ -20,7 +18,7 @@ struct PostModel: Identifiable, Codable {
     var longitude: Double?
 }
 
-struct MusicInfo: Codable {
+struct MusicInfo: Codable, Equatable {
     var title: String
     var artist: String
 }

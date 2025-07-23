@@ -1,24 +1,95 @@
+// CameraService.swift
+
 import Foundation
-import UIKit
+import AVFoundation
+import CoreLocation
 import SwiftUI
+import UIKit
 
-class CameraService: NSObject, ObservableObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-    @Published var image: UIImage?
-    @Published var didCapturePhoto = false
+final class CameraService: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate, CLLocationManagerDelegate {
+    @Published var capturedImage: UIImage?
+    @Published var currentLocation: CLLocation?
 
-    func presentCamera(from viewController: UIViewController) {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = self
-        picker.cameraCaptureMode = .photo
-        viewController.present(picker, animated: true)
+    private let captureSession = AVCaptureSession()
+    private let photoOutput = AVCapturePhotoOutput()
+    private let locationManager = CLLocationManager()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+
+    override init() {
+        super.init()
+        configureCamera()
+        configureLocation()
     }
 
-    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-        if let capturedImage = info[.originalImage] as? UIImage {
-            self.image = capturedImage
-            self.didCapturePhoto = true
+    // MARK: - Camera Setup
+    private func configureCamera() {
+        captureSession.beginConfiguration()
+        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              let videoInput = try? AVCaptureDeviceInput(device: videoDevice),
+              captureSession.canAddInput(videoInput),
+              captureSession.canAddOutput(photoOutput) else {
+            print("❌ Failed to set up camera")
+            return
         }
-        picker.dismiss(animated: true)
+
+        captureSession.addInput(videoInput)
+        captureSession.addOutput(photoOutput)
+        captureSession.sessionPreset = .photo
+        captureSession.commitConfiguration()
+    }
+
+    func startSession() {
+        if !captureSession.isRunning {
+            captureSession.startRunning()
+        }
+    }
+
+    func stopSession() {
+        if captureSession.isRunning {
+            captureSession.stopRunning()
+        }
+    }
+
+    func getPreviewLayer() -> AVCaptureVideoPreviewLayer {
+        if previewLayer == nil {
+            previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+            previewLayer?.videoGravity = .resizeAspectFill
+        }
+        return previewLayer!
+    }
+
+    // MARK: - Capture Photo
+    func capturePhoto() {
+        let settings = AVCapturePhotoSettings()
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error = error {
+            print("❌ Photo capture error: \(error.localizedDescription)")
+            return
+        }
+
+        guard let imageData = photo.fileDataRepresentation(),
+              let uiImage = UIImage(data: imageData) else {
+            print("❌ Failed to convert image data")
+            return
+        }
+
+        DispatchQueue.main.async {
+            self.capturedImage = uiImage
+        }
+    }
+
+    // MARK: - Location Setup
+    private func configureLocation() {
+        locationManager.delegate = self
+        locationManager.requestWhenInUseAuthorization()
+        locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        locationManager.startUpdatingLocation()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        currentLocation = locations.last
     }
 }

@@ -1,130 +1,160 @@
 import SwiftUI
-import CoreLocation
 import FirebaseStorage
 import FirebaseAuth
+import CoreLocation
+import PhotosUI
 
 struct CreatePostView: View {
     @State private var capturedImage: UIImage?
     @State private var title = ""
     @State private var labels = ""
+    @State private var specialInstruction = ""
     @State private var musicTitle = ""
     @State private var musicArtist = ""
-    @State private var comment = ""
-    @State private var isUploading = false
-    @State private var uploadMessage = ""
+    @State private var isShowingCamera = false
+    @State private var isSubmitting = false
+    @State private var currentLocation: CLLocationCoordinate2D?
 
-    @StateObject private var locationManager = LocationManager() // ✅ use your utils/LocationManager
+    private let locationManager = CLLocationManager()
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if let image = capturedImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .cornerRadius(12)
-
-                    TextField("Title", text: $title)
-                        .textFieldStyle(.roundedBorder)
-
-                    TextField("Labels (comma-separated)", text: $labels)
-                        .textFieldStyle(.roundedBorder)
-
-                    TextField("Music Title", text: $musicTitle)
-                        .textFieldStyle(.roundedBorder)
-
-                    TextField("Music Artist", text: $musicArtist)
-                        .textFieldStyle(.roundedBorder)
-
-                    TextField("Special Instructions", text: $comment)
-                        .textFieldStyle(.roundedBorder)
-
-                    Button("Upload Post") {
-                        uploadPost()
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Show captured image
+                    if let image = capturedImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity)
+                            .cornerRadius(12)
+                    } else {
+                        Button(action: {
+                            isShowingCamera = true
+                        }) {
+                            Label("Take Photo", systemImage: "camera.fill")
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.purple.opacity(0.2))
+                                .cornerRadius(12)
+                        }
                     }
-                    .disabled(isUploading)
-                } else {
-                    CameraView(capturedImage: $capturedImage)
-                        .frame(height: 400)
-                }
 
-                if isUploading {
-                    ProgressView(uploadMessage)
+                    Group {
+                        TextField("Title", text: $title)
+                        TextField("Labels (comma separated)", text: $labels)
+                        TextField("Add a note...", text: $specialInstruction)
+                        TextField("Music Title", text: $musicTitle)
+                        TextField("Artist", text: $musicArtist)
+                    }
+                    .textFieldStyle(.roundedBorder)
+
+                    Button(action: uploadPost) {
+                        if isSubmitting {
+                            ProgressView()
+                        } else {
+                            Text("Post")
+                                .bold()
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.purple)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                        }
+                    }
+                    .disabled(isSubmitting || capturedImage == nil)
                 }
+                .padding()
+                .onAppear(perform: fetchUserLocation)
             }
-            .padding()
-        }
-        .onAppear {
-            locationManager.requestLocationOnce() // ✅ one-time location request
+            .sheet(isPresented: $isShowingCamera) {
+                CameraView(image: $capturedImage)
+            }
+            .navigationTitle("Create Post")
         }
     }
 
-    func uploadPost() {
+    // MARK: - Upload Post
+    private func uploadPost() {
         guard let image = capturedImage,
-              let userId = Auth.auth().currentUser?.uid else { return }
+              let user = FirestoreUserService.shared.currentUser,
+              let uid = Auth.auth().currentUser?.uid else { return }
 
-        isUploading = true
-        uploadMessage = "Uploading image..."
+        isSubmitting = true
 
-        uploadImageToFirebase(image: image) { result in
+        uploadImageToStorage(image: image) { result in
             switch result {
-            case .success(let imageUrl):
-                let music = MusicInfo(title: musicTitle, artist: musicArtist)
-
+            case .success(let url):
                 let post = PostModel(
-                    id: nil,
-                    userId: userId,
-                    username: "", // optional: fill with actual username if available
-                    location: locationManager.userPlacemark?.locality ?? "", // ✅ optional readable location
+                    userId: uid,
+                    username: user.username,
+                    location: "unknown",
                     title: title,
                     labels: labels.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) },
-                    specialInstruction: comment,
-                    music: music,
+                    specialInstruction: specialInstruction,
+                    music: MusicInfo(title: musicTitle, artist: musicArtist),
                     upvotes: 0,
                     downvotes: 0,
-                    imageUrl: imageUrl,
+                    imageUrl: url,
                     createdAt: Date(),
-                    latitude: locationManager.userLocation?.coordinate.latitude ?? 0.0,
-                    longitude: locationManager.userLocation?.coordinate.longitude ?? 0.0
+                    latitude: currentLocation?.latitude,
+                    longitude: currentLocation?.longitude
                 )
 
-                FirestorePostService.shared.createPost(post) { result in
-                    isUploading = false
-                    switch result {
-                    case .success:
-                        uploadMessage = "✅ Post uploaded successfully!"
-                    case .failure(let error):
-                        uploadMessage = "❌ Upload failed: \(error.localizedDescription)"
+                FirestorePostService.shared.createPost(post) { success in
+                    isSubmitting = false
+                    if success {
+                        resetForm()
                     }
                 }
-
             case .failure(let error):
-                isUploading = false
-                uploadMessage = "❌ Image upload failed: \(error.localizedDescription)"
+                print("❌ Upload error: \(error.localizedDescription)")
+                isSubmitting = false
             }
         }
     }
 
-    func uploadImageToFirebase(image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            completion(.failure(NSError(domain: "image-error", code: 0)))
+    private func resetForm() {
+        capturedImage = nil
+        title = ""
+        labels = ""
+        specialInstruction = ""
+        musicTitle = ""
+        musicArtist = ""
+        currentLocation = nil
+    }
+
+    // MARK: - Upload Image
+    private func uploadImageToStorage(image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let data = image.jpegData(compressionQuality: 0.8) else {
+            completion(.failure(NSError(domain: "Image error", code: 0)))
             return
         }
 
-        let fileName = UUID().uuidString + ".jpg"
-        let ref = Storage.storage().reference().child("post_images/\(fileName)")
-        ref.putData(imageData, metadata: nil) { _, error in
+        let filename = UUID().uuidString
+        let ref = Storage.storage().reference().child("post_images/\(filename).jpg")
+
+        ref.putData(data, metadata: nil) { _, error in
             if let error = error {
                 completion(.failure(error))
                 return
             }
+
             ref.downloadURL { url, error in
                 if let url = url {
                     completion(.success(url.absoluteString))
-                } else if let error = error {
-                    completion(.failure(error))
+                } else {
+                    completion(.failure(error ?? NSError()))
                 }
             }
+        }
+    }
+
+    // MARK: - Location
+    private func fetchUserLocation() {
+        locationManager.requestWhenInUseAuthorization()
+        if let loc = locationManager.location?.coordinate {
+            currentLocation = loc
         }
     }
 }

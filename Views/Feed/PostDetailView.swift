@@ -1,4 +1,7 @@
+// MARK: - PostDetailView.swift
+
 import SwiftUI
+import SDWebImageSwiftUI
 
 struct PostDetailView: View {
     let post: PostModel
@@ -6,57 +9,92 @@ struct PostDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if let url = URL(string: post.imageUrl) {
-                    AsyncImage(url: url) { image in
-                        image
-                            .resizable()
-                            .scaledToFit()
-                            .cornerRadius(12)
-                    } placeholder: {
+                // Image
+                WebImage(url: URL(string: post.imageUrl))
+                    .resizable()
+                    .placeholder {
                         ProgressView()
                     }
+                    .aspectRatio(contentMode: .fill)
+                    .frame(height: 300)
+                    .clipped()
+                    .cornerRadius(12)
+
+                // Title & Username
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(post.title)
+                        .font(.title)
+                        .bold()
+
+                    Text("Posted by \(post.username)")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
                 }
 
-                Text(post.title)
-                    .font(.title)
-                    .bold()
+                Divider()
 
-                Text("📍 Location: \(post.location)")
-                    .font(.subheadline)
-
+                // Labels
                 if !post.labels.isEmpty {
-                    HStack {
-                        ForEach(post.labels, id: \.self) { label in
-                            Text(label)
-                                .font(.caption)
-                                .padding(6)
-                                .background(Color.blue.opacity(0.2))
-                                .cornerRadius(6)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Labels")
+                            .font(.headline)
+
+                        HStack {
+                            ForEach(post.labels, id: \.self) { label in
+                                Text(label.capitalized)
+                                    .font(.caption)
+                                    .padding(8)
+                                    .background(Color.secondary.opacity(0.2))
+                                    .cornerRadius(8)
+                            }
                         }
                     }
                 }
 
-                Text("📝 Instructions: \(post.specialInstruction)")
-                    .font(.body)
+                // Music
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("🎵 Music")
+                        .font(.headline)
 
-                Text("🎶 Song: \(post.music.title) - \(post.music.artist)")
-                    .font(.footnote)
-
-                HStack {
-                    Text("👍 \(post.upvotes)")
-                    Text("👎 \(post.downvotes)")
+                    Text("\(post.music.title) — \(post.music.artist)")
+                        .font(.subheadline)
                 }
-                .font(.footnote)
-                .foregroundColor(.gray)
 
-                if let createdAt = post.createdAt {
-                    Text("🕒 Posted on \(createdAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                // Instructions
+                if !post.specialInstruction.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Note")
+                            .font(.headline)
+
+                        Text(post.specialInstruction)
+                            .font(.body)
+                    }
                 }
+
+                // Coordinates (optional)
+                if let lat = post.latitude, let lon = post.longitude {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Location")
+                            .font(.headline)
+
+                        Text("Lat: \(lat), Lon: \(lon)")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                }
+
+                // MARK: - Voting Buttons
+                VotingButtonsView(
+                    postId: post.id ?? "",
+                    initialUpvotes: post.upvotes,
+                    initialDownvotes: post.downvotes
+                )
+
+                Spacer()
             }
             .padding()
         }
-        .navigationTitle("Post Details")
+        .navigationTitle("Post Detail")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

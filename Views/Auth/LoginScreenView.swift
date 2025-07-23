@@ -1,32 +1,24 @@
-// LoginScreenView.swift
-
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 
 struct LoginScreenView: View {
-    // MARK: - State Properties
     @State private var identifier = ""
     @State private var password = ""
     @State private var errorMessage = ""
     @State private var isLoading = false
-    @State private var navigateToHome = false
-    @State private var showSignUp = false
+    @State private var goToMainApp = false
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 30) {
-                // MARK: - App Logo
-                Image("app_logo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 100, height: 100)
-                    .padding(.top, 40)
+            VStack(spacing: 24) {
+                Text("Log In to SceneIt")
+                    .font(.title)
+                    .bold()
 
-                // MARK: - Input Fields
-                TextField("Email, Phone, or Username", text: $identifier)
+                TextField("Phone, Email, or Username", text: $identifier)
+                    .keyboardType(.emailAddress)
                     .autocapitalization(.none)
-                    .disableAutocorrection(true)
                     .padding()
                     .background(Color(.systemGray6))
                     .cornerRadius(10)
@@ -36,134 +28,80 @@ struct LoginScreenView: View {
                     .background(Color(.systemGray6))
                     .cornerRadius(10)
 
-                // MARK: - Error Message
                 if !errorMessage.isEmpty {
                     Text(errorMessage)
                         .foregroundColor(.red)
                         .font(.caption)
                 }
 
-                // MARK: - Login Button
                 if isLoading {
                     ProgressView()
                 } else {
-                    Button("Login") {
-                        Task {
-                            await handleLogin()
-                        }
+                    Button("Log In") {
+                        Task { await loginUser() }
                     }
                     .disabled(identifier.isEmpty || password.isEmpty)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(identifier.isEmpty || password.isEmpty ? Color.gray : Color.green)
+                    .background((identifier.isEmpty || password.isEmpty) ? Color.gray : Color.purple)
                     .foregroundColor(.white)
                     .cornerRadius(10)
                 }
-
-                // MARK: - Forgot Password
-                Button("Forgot password?") {
-                    // To be implemented
-                }
-                .font(.footnote)
-                .foregroundColor(.blue)
-
-                // MARK: - Sign Up
-                Button("Sign Up") {
-                    showSignUp = true
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.purple)
-                .foregroundColor(.white)
-                .cornerRadius(10)
 
                 Spacer()
             }
             .padding()
             .navigationBarHidden(true)
-            .fullScreenCover(isPresented: $navigateToHome) {
-                HomeView()
-            }
-            .fullScreenCover(isPresented: $showSignUp) {
-                SignUpUsernameView()
+            .fullScreenCover(isPresented: $goToMainApp) {
+                MainTabController()
             }
         }
     }
 
     // MARK: - Login Logic
-    func handleLogin() async {
+    func loginUser() async {
         errorMessage = ""
         isLoading = true
 
-        do {
-            let db = Firestore.firestore()
-            let usersRef = db.collection("users")
+        let emailToUse: String
 
-            if isValidEmail(identifier) {
-                try await signInWith(email: identifier.lowercased(), password: password)
-                return
-            }
-
-            if isValidPhone(identifier) {
-                let phoneDigits = onlyDigits(from: identifier)
-                let snapshot = try await usersRef
-                    .whereField("contact_phone_digits", isEqualTo: phoneDigits)
+        if identifier.contains("@") {
+            // Email login
+            emailToUse = identifier.lowercased()
+        } else if identifier.allSatisfy({ $0.isNumber }) {
+            // Phone login
+            let digits = identifier.filter("0123456789".contains)
+            emailToUse = "\(digits)@sceneit.app"
+        } else {
+            // Username login → lookup contact_email
+            do {
+                let result = try await Firestore.firestore()
+                    .collection("users")
+                    .whereField("username_lower", isEqualTo: identifier.lowercased())
                     .getDocuments()
-
-                guard let data = snapshot.documents.first?.data(),
-                      let email = data["contact_email"] as? String else {
-                    throw NSError(domain: "SceneIt", code: 1, userInfo: [NSLocalizedDescriptionKey: "Phone number account not found or missing email."])
+                
+                guard let doc = result.documents.first,
+                      let contactEmail = doc.data()["contact_email"] as? String else {
+                    self.errorMessage = "Username not found."
+                    self.isLoading = false
+                    return
                 }
-
-                try await signInWith(email: email, password: password)
+                emailToUse = contactEmail
+            } catch {
+                self.errorMessage = "Error finding username: \(error.localizedDescription)"
+                self.isLoading = false
                 return
             }
+        }
 
-            let snapshot = try await usersRef
-                .whereField("username_lower", isEqualTo: identifier.lowercased())
-                .getDocuments()
-
-            guard let data = snapshot.documents.first?.data(),
-                  let email = data["contact_email"] as? String else {
-                throw NSError(domain: "SceneIt", code: 2, userInfo: [NSLocalizedDescriptionKey: "Account not found for username."])
-            }
-
-            try await signInWith(email: email, password: password)
-
+        // Try login with resolved email
+        do {
+            try await Auth.auth().signIn(withEmail: emailToUse, password: password)
+            self.goToMainApp = true
         } catch {
-            errorMessage = "Login failed: \(error.localizedDescription)"
+            self.errorMessage = "Login failed: \(error.localizedDescription)"
         }
 
         isLoading = false
-    }
-
-    // MARK: - Firebase Sign-In
-    func signInWith(email: String, password: String) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            Auth.auth().signIn(withEmail: email, password: password) { _, error in
-                isLoading = false
-                if let error = error {
-                    errorMessage = error.localizedDescription
-                    continuation.resume(throwing: error)
-                } else {
-                    navigateToHome = true
-                    continuation.resume()
-                }
-            }
-        }
-    }
-
-    // MARK: - Input Helpers
-    func isValidEmail(_ email: String) -> Bool {
-        let regex = #"^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"#
-        return NSPredicate(format: "SELF MATCHES %@", regex).evaluate(with: email)
-    }
-
-    func isValidPhone(_ phone: String) -> Bool {
-        onlyDigits(from: phone).count >= 10
-    }
-
-    func onlyDigits(from input: String) -> String {
-        input.filter("0123456789".contains)
     }
 }

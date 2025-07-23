@@ -1,30 +1,34 @@
 import SwiftUI
 
+enum TabItem: String, CaseIterable {
+    case home = "house"
+    case map = "map"
+    case camera = "camera"
+    case network = "person.2"
+    case profile = "person.crop.circle"
+}
+
 struct BottomNavBarView: View {
-    @Binding var selectedTab: Int
+    @Binding var selectedTab: TabItem
 
     var body: some View {
         HStack {
-            navButton(systemIcon: "house", index: 0)
-            navButton(systemIcon: "map", index: 1)
-            navButton(systemIcon: "camera", index: 2)
-            navButton(systemIcon: "person.3", index: 3)
-            navButton(systemIcon: "person.crop.circle", index: 4)
+            ForEach(TabItem.allCases, id: \.self) { tab in
+                Spacer()
+                Button(action: {
+                    selectedTab = tab
+                }) {
+                    Image(systemName: tab.rawValue)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(selectedTab == tab ? .purple : .gray)
+                        .padding(10)
+                }
+                Spacer()
+            }
         }
-        .padding()
-        .background(Color.white.shadow(radius: 4))
-    }
-
-    func navButton(systemIcon: String, index: Int) -> some View {
-        Button(action: {
-            selectedTab = index
-        }) {
-            Image(systemName: systemIcon)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 25, height: 25)
-                .foregroundColor(selectedTab == index ? .blue : .gray)
-        }
-        .frame(maxWidth: .infinity)
+        .padding(.top, 6)
+        .padding(.bottom, 20)
+        .background(Color.white.ignoresSafeArea(edges: .bottom))
+        .shadow(radius: 3)
     }
 }

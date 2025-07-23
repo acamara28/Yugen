@@ -2,57 +2,74 @@ import Foundation
 import CoreLocation
 import FirebaseFirestore
 
-class LocationCheckService: NSObject, ObservableObject, CLLocationManagerDelegate {
+final class LocationCheckService: NSObject, ObservableObject, CLLocationManagerDelegate {
+    static let shared = LocationCheckService()
+
     private let locationManager = CLLocationManager()
     private let db = Firestore.firestore()
-    
-    @Published var nearbyLocationID: String? = nil
-    @Published var isChecking = false
-    @Published var locationError: String?
+    private let checkInRadius: Double = 75 // meters
 
-    private var currentLocation: CLLocation?
+    @Published var nearbyLocationId: String?
 
     override init() {
         super.init()
         locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         locationManager.requestWhenInUseAuthorization()
         locationManager.startUpdatingLocation()
     }
 
+    // MARK: - CLLocationManagerDelegate
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let latest = locations.last else { return }
-        currentLocation = latest
+        guard let currentLocation = locations.last else { return }
+        checkProximity(to: currentLocation)
     }
 
-    func checkProximityToLocations(radiusMeters: Double = 75.0) {
-        guard let userLocation = currentLocation else {
-            locationError = "Location not available"
-            return
-        }
-
-        isChecking = true
+    // MARK: - Check Proximity to Locations in Firestore
+    func checkProximity(to currentLocation: CLLocation) {
         db.collection("locations").getDocuments { snapshot, error in
-            self.isChecking = false
-            if let error = error {
-                self.locationError = "Error fetching locations: \(error.localizedDescription)"
-                return
-            }
-
-            guard let documents = snapshot?.documents else { return }
+            guard error == nil, let documents = snapshot?.documents else { return }
 
             for doc in documents {
                 let data = doc.data()
-                if let geo = data["coordinates"] as? GeoPoint {
-                    let location = CLLocation(latitude: geo.latitude, longitude: geo.longitude)
-                    let distance = userLocation.distance(from: location)
-                    if distance <= radiusMeters {
-                        self.nearbyLocationID = doc.documentID
-                        return
+                if let lat = data["latitude"] as? CLLocationDegrees,
+                   let lon = data["longitude"] as? CLLocationDegrees {
+                    let location = CLLocation(latitude: lat, longitude: lon)
+                    let distance = currentLocation.distance(from: location)
+                    if distance <= self.checkInRadius {
+                        DispatchQueue.main.async {
+                            self.nearbyLocationId = doc.documentID
+                        }
+                        break
                     }
                 }
             }
-
-            self.nearbyLocationID = nil
         }
+    }
+
+    // MARK: - Trigger Check-in Logic (UI can observe nearbyLocationId)
+    func clearNearbyLocation() {
+        self.nearbyLocationId = nil
+    }
+
+    // MARK: - Check-in Function
+    func logUserCheckIn(userId: String, locationId: String, completion: @escaping (Bool) -> Void) {
+        let contributionData: [String: Any] = [
+            "timestamp": Timestamp(date: Date())
+        ]
+
+        db.collection("location_details")
+            .document(locationId)
+            .collection("checkins")
+            .document(userId)
+            .setData(contributionData, merge: true) { error in
+                if let error = error {
+                    print("❌ Failed to check-in: \(error.localizedDescription)")
+                    completion(false)
+                } else {
+                    print("✅ User checked in to location \(locationId)")
+                    completion(true)
+                }
+            }
     }
 }

@@ -1,29 +1,34 @@
 import SwiftUI
+import FirebaseAuth
 
 struct SplashScreenView: View {
-    @State private var fadeOut = false
-    @State private var showLogin = false
+    @State private var isActive = false
 
     var body: some View {
-        ZStack {
-            Image("sceneit_icon_SplashScreen")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 180, height: 180)
-                .opacity(fadeOut ? 0 : 1)
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                withAnimation {
-                    fadeOut = true
+        Group {
+            if isActive {
+                RootRouterView() // Main entry point after splash
+            } else {
+                VStack {
+                    Image(systemName: "location.circle.fill")
+                        .resizable()
+                        .frame(width: 100, height: 100)
+                        .foregroundColor(Color(hex: "#B57EDC"))
+                    Text("Yugen")
+                        .font(.largeTitle)
+                        .bold()
+                        .padding(.top, 16)
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    showLogin = true
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.white)
             }
         }
-        .fullScreenCover(isPresented: $showLogin) {
-            LoginScreenView()
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                withAnimation {
+                    isActive = true
+                }
+            }
         }
     }
 }

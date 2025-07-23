@@ -1,30 +1,106 @@
 import SwiftUI
+import SDWebImageSwiftUI
 import FirebaseAuth
 
 struct ProfileViewPage: View {
-    @State private var posts: [PostModel] = []
+    @StateObject private var userService = FirestoreUserService.shared
+    @State private var userPosts: [PostModel] = []
 
     var body: some View {
-        ScrollView {
-            LazyVStack {
-                ForEach(posts) { post in
-                    PostCardView(post: post)
-                }
-            }
-        }
-        .onAppear {
-            if let userId = Auth.auth().currentUser?.uid {
-                FirestorePostService.shared.fetchUserPosts(for: userId) { result in
-                    switch result {
-                    case .success(let posts):
-                        self.posts = posts
-                    case .failure(let error):
-                        print("Error loading posts: \(error)")
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // MARK: - Profile Header
+                    if let user = userService.currentUser {
+                        VStack(spacing: 12) {
+                            if let urlStr = user.profileImageUrl,
+                               let url = URL(string: urlStr) {
+                                WebImage(url: url)
+                                    .resizable()
+                                    .placeholder { ProgressView() }
+                                    .scaledToFill()
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(Circle())
+                            } else {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .resizable()
+                                    .frame(width: 100, height: 100)
+                                    .foregroundColor(.gray)
+                            }
+
+                            Text(user.username)
+                                .font(.title2)
+                                .bold()
+
+                            if let name = user.fullName {
+                                Text(name)
+                                    .font(.subheadline)
+                                    .foregroundColor(.gray)
+                            }
+
+                            // MARK: - Visited Location Count
+                            HStack {
+                                VStack {
+                                    Text("\(user.visitedLocations.count)")
+                                        .font(.title3)
+                                        .bold()
+                                    Text("Visited Spots")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                        }
+                        .padding()
                     }
+
+                    Divider()
+
+                    // MARK: - Posts
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("My Posts")
+                            .font(.headline)
+
+                        ForEach(userPosts, id: \.id) { post in
+                            NavigationLink(destination: PostDetailView(post: post)) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    WebImage(url: URL(string: post.imageUrl))
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(height: 200)
+                                        .cornerRadius(10)
+                                        .clipped()
+
+                                    Text(post.title)
+                                        .font(.subheadline)
+                                        .bold()
+                                        .padding(.leading, 4)
+
+                                    Text("At: \(post.location)")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                        .padding(.leading, 4)
+                                }
+                            }
+                        }
+                    }
+                    .padding()
                 }
-            } else {
-                print("❌ No logged-in user")
             }
+            .navigationTitle("My Profile")
+            .onAppear(perform: loadUserPosts)
         }
+    }
+
+    // MARK: - Load User Posts
+    private func loadUserPosts() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Firestore.firestore().collection("posts")
+            .whereField("userId", isEqualTo: uid)
+            .order(by: "createdAt", descending: true)
+            .getDocuments { snapshot, error in
+                if let docs = snapshot?.documents {
+                    self.userPosts = docs.compactMap { try? $0.data(as: PostModel.self) }
+                }
+            }
     }
 }

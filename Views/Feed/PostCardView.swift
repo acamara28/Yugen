@@ -2,7 +2,6 @@ import SwiftUI
 
 struct PostCardView: View {
     let post: PostModel
-    let onDetailTap: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -51,9 +50,6 @@ struct PostCardView: View {
             HStack {
                 Button { } label: { Image(systemName: "hand.thumbsup") }
                 Button { } label: { Image(systemName: "hand.thumbsdown") }
-                Button(action: onDetailTap) {
-                    Image(systemName: "arrow.right.circle")
-                }
             }
             .font(.caption)
             .foregroundColor(.gray)

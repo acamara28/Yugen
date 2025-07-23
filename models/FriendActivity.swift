@@ -1,82 +1,103 @@
-
-
 import Foundation
 import Firebase
-import FirebaseAuth
+import FirebaseFirestore
 
-struct FriendActivity: Identifiable {
+struct FriendActivity: Identifiable, Codable {
     let id: String
     let username: String
+    let actionType: String
     let locationName: String
-    let tags: [String]
-    let music: MusicInfo?
-    let rating: Int?
-    let timestamp: Date?
+    let timestamp: Date
 }
 
-class ActivityService: ObservableObject {
+final class ActivityService: ObservableObject {
     static let shared = ActivityService()
-    @Published var activities: [FriendActivity] = []
-
     private let db = Firestore.firestore()
 
-    func fetchFriendActivity(for userId: String) {
-        // Replace with real friends list fetch if needed
-        let friendsRef = db.collection("users").document(userId).collection("friends")
-
-        friendsRef.getDocuments { snapshot, error in
+    // Fetch user’s friends' IDs
+    func fetchFriendUIDs(for currentUserID: String, completion: @escaping ([String]) -> Void) {
+        db.collection("users").document(currentUserID).collection("friends").getDocuments { snapshot, error in
             if let error = error {
                 print("❌ Error fetching friends: \(error.localizedDescription)")
+                completion([])
                 return
             }
+            let friendUIDs = snapshot?.documents.map { $0.documentID } ?? []
+            completion(friendUIDs)
+        }
+    }
 
-            guard let docs = snapshot?.documents else { return }
-            let friendIds = docs.map { $0.documentID }
+    // Fetch activity from all friend contributions
+    func fetchFriendActivities(for currentUserID: String, completion: @escaping ([FriendActivity]) -> Void) {
+        fetchFriendUIDs(for: currentUserID) { friendUIDs in
+            self.db.collection("location_details").getDocuments { snapshot, error in
+                if let error = error {
+                    print("❌ Error fetching locations: \(error.localizedDescription)")
+                    completion([])
+                    return
+                }
 
-            self.activities = [] // Reset before fetching
+                let locationDocs = snapshot?.documents ?? []
+                var allActivities: [FriendActivity] = []
+                let dispatchGroup = DispatchGroup()
 
-            for friendId in friendIds {
-                self.db.collection("location_details")
-                    .getDocuments { locationSnapshot, error in
-                        guard let locations = locationSnapshot?.documents else { return }
+                for locationDoc in locationDocs {
+                    let locationId = locationDoc.documentID
+                    let locationName = locationDoc.data()["name"] as? String ?? "Unknown Spot"
 
-                        for locationDoc in locations {
-                            let locationId = locationDoc.documentID
-                            let contributionRef = self.db.collection("location_details")
-                                .document(locationId)
-                                .collection("contributions")
-                                .document(friendId)
+                    dispatchGroup.enter()
+                    self.db.collection("location_details")
+                        .document(locationId)
+                        .collection("contributions")
+                        .getDocuments { contribSnapshot, contribError in
 
-                            contributionRef.getDocument { docSnap, error in
-                                if let data = docSnap?.data(), docSnap?.exists == true {
-                                    let username = friendId // Replace with username lookup if needed
-                                    let tags = data["tags"] as? [String] ?? []
-                                    let rating = data["rating"] as? Int
-                                    let musicDict = data["music"] as? [String: String]
-                                    let music = MusicInfo(
-                                        title: musicDict?["title"] ?? "",
-                                        artist: musicDict?["artist"] ?? ""
-                                    )
-                                    let timestamp = (data["timestamp"] as? Timestamp)?.dateValue()
-
-                                    let activity = FriendActivity(
-                                        id: "\(friendId)_\(locationId)",
-                                        username: username,
-                                        locationName: locationId,
-                                        tags: tags,
-                                        music: music,
-                                        rating: rating,
-                                        timestamp: timestamp
-                                    )
-
-                                    DispatchQueue.main.async {
-                                        self.activities.append(activity)
-                                    }
-                                }
-                            }
+                        if let contribError = contribError {
+                            print("❌ Error fetching contributions: \(contribError.localizedDescription)")
+                            dispatchGroup.leave()
+                            return
                         }
+
+                        let contributions = contribSnapshot?.documents ?? []
+                        for doc in contributions {
+                            let userId = doc.documentID
+                            guard friendUIDs.contains(userId) else { continue }
+                            let data = doc.data()
+                            let activities = self.parseContributionData(data: data, locationName: locationName)
+                            allActivities.append(contentsOf: activities)
+                        }
+
+                        dispatchGroup.leave()
                     }
+                }
+
+                dispatchGroup.notify(queue: .main) {
+                    let sorted = allActivities.sorted { $0.timestamp > $1.timestamp }
+                    completion(sorted)
+                }
             }
         }
+    }
+
+    private func parseContributionData(data: [String: Any], locationName: String) -> [FriendActivity] {
+        var results: [FriendActivity] = []
+
+        let username = data["username"] as? String ?? "Friend"
+        let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
+        let idBase = UUID().uuidString
+
+        if let tags = data["tags"] as? [String], !tags.isEmpty {
+            results.append(FriendActivity(id: "\(idBase)-tags", username: username, actionType: "added tags", locationName: locationName, timestamp: timestamp))
+        }
+        if data["music"] as? [String: String] != nil {
+            results.append(FriendActivity(id: "\(idBase)-music", username: username, actionType: "added music", locationName: locationName, timestamp: timestamp))
+        }
+        if let note = data["instructions"] as? String, !note.isEmpty {
+            results.append(FriendActivity(id: "\(idBase)-note", username: username, actionType: "left a note", locationName: locationName, timestamp: timestamp))
+        }
+        if data["rating"] != nil {
+            results.append(FriendActivity(id: "\(idBase)-rating", username: username, actionType: "rated this spot", locationName: locationName, timestamp: timestamp))
+        }
+
+        return results
     }
 }
