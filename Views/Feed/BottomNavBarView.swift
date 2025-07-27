@@ -1,3 +1,11 @@
+//
+//  TabItem.swift
+//  SceneIt
+//
+//  Created by Alpha  Camara on 7/26/25.
+//
+
+
 import SwiftUI
 
 enum TabItem: String, CaseIterable {
