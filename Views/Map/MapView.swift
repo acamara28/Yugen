@@ -1,19 +1,7 @@
 import SwiftUI
 import MapKit
 import FirebaseFirestore
-import FirebaseFirestoreSwift
-
-struct ScenicLocation: Identifiable, Equatable {
-    var id: String
-    var name: String
-    var latitude: Double
-    var longitude: Double
-    var posts: [PostModel] = []
-
-    static func == (lhs: ScenicLocation, rhs: ScenicLocation) -> Bool {
-        lhs.id == rhs.id
-    }
-}
+import FirebaseFirestore
 
 struct MapView: View {
     @State private var region = MKCoordinateRegion(
@@ -38,7 +26,7 @@ struct MapView: View {
                             Image(systemName: "mappin.circle.fill")
                                 .resizable()
                                 .frame(width: 32, height: 32)
-                                .foregroundColor(Color(hex: "#B57EDC")) // Lavender
+                                .foregroundColor(Color(hex: "#B57EDC"))
                         }
                     }
                 }
@@ -101,7 +89,6 @@ struct MapView: View {
         }
     }
 
-    // MARK: - Fetch Locations
     private func fetchLocations() {
         Firestore.firestore().collection("locations").getDocuments { snapshot, error in
             guard error == nil, let docs = snapshot?.documents else { return }
@@ -122,12 +109,8 @@ struct MapView: View {
         }
     }
 
-    // MARK: - Fetch Posts Near Location
     private func fetchPostsFor(location: ScenicLocation) {
-        let targetGeoPoint = GeoPoint(latitude: location.latitude, longitude: location.longitude)
-        let postsRef = Firestore.firestore().collection("posts")
-
-        postsRef
+        Firestore.firestore().collection("posts")
             .order(by: "timestamp", descending: true)
             .limit(to: 10)
             .getDocuments { snapshot, error in
@@ -140,8 +123,13 @@ struct MapView: View {
                     try? doc.data(as: PostModel.self)
                 }.filter { post in
                     guard let postLocation = post.location else { return false }
-                    let dist = distanceBetween(lat1: postLocation.latitude, lon1: postLocation.longitude, lat2: location.latitude, lon2: location.longitude)
-                    return dist < 0.5 // 0.5 km radius
+                    let dist = distanceBetween(
+                        lat1: postLocation.latitude,
+                        lon1: postLocation.longitude,
+                        lat2: location.latitude,
+                        lon2: location.longitude
+                    )
+                    return dist < 0.5
                 } ?? []
 
                 if let index = scenicLocations.firstIndex(of: location) {
@@ -151,23 +139,19 @@ struct MapView: View {
             }
     }
 
-    // MARK: - Distance Function (Haversine)
     private func distanceBetween(lat1: Double, lon1: Double, lat2: Double, lon2: Double) -> Double {
-        let earthRadius = 6371.0 // in km
-
+        let earthRadius = 6371.0
         let dLat = (lat2 - lat1).degreesToRadians
         let dLon = (lon2 - lon1).degreesToRadians
 
-        let a = sin(dLat / 2) * sin(dLat / 2) +
-                cos(lat1.degreesToRadians) * cos(lat2.degreesToRadians) *
-                sin(dLon / 2) * sin(dLon / 2)
+        let a = sin(dLat / 2) * sin(dLat / 2)
+              + cos(lat1.degreesToRadians) * cos(lat2.degreesToRadians)
+              * sin(dLon / 2) * sin(dLon / 2)
 
-        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return earthRadius * c
+        return earthRadius * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 }
 
-// MARK: - Helpers
 extension Double {
     var degreesToRadians: Double { self * .pi / 180 }
 }

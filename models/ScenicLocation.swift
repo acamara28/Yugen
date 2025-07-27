@@ -1,5 +1,13 @@
+//
+//  ScenicLocation.swift
+//  SceneIt
+//
+//  Created by Alpha  Camara on 7/26/25.
+//
+
+
 import Foundation
-import FirebaseFirestoreSwift
+import FirebaseFirestore
 
 struct ScenicLocation: Identifiable, Equatable {
     var id: String

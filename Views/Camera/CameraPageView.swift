@@ -18,7 +18,7 @@ struct CameraPageView: View {
                 }
                 .foregroundColor(.red)
             } else {
-                CameraView(capturedImage: $capturedImage)
+                CameraView(image: $capturedImage)
                     .edgesIgnoringSafeArea(.all)
             }
         }

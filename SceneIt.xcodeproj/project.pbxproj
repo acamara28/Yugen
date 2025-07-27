@@ -37,6 +37,20 @@
 		9880C17D2DF94EEA008872D0 /* FirebaseVertexAI in Frameworks */ = {isa = PBXBuildFile; productRef = 9880C17C2DF94EEA008872D0 /* FirebaseVertexAI */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXBuildRule section */
+		987F34512E3552180011620B /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			fileType = folder.rkassets;
+			inputFiles = (
+			);
+			isEditable = 1;
+			outputFiles = (
+			);
+			script = "# realitytool\n";
+		};
+/* End PBXBuildRule section */
+
 /* Begin PBXContainerItemProxy section */
 		9880C0FF2DF493A5008872D0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -74,6 +88,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		980017CA2E35555D00533B70 /* Exceptions for "SceneIt" folder in "SceneIt" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				"Preview Content/Preview Assets.xcassets",
+			);
+			target = 9880C0EC2DF493A2008872D0 /* SceneIt */;
+		};
 		982EB5322E2B31DE00A4FA60 /* Exceptions for "Services" folder in "SceneIt" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -82,16 +104,17 @@
 			);
 			target = 9880C0EC2DF493A2008872D0 /* SceneIt */;
 		};
-		982EB55E2E2B3C8B00A4FA60 /* Exceptions for "SceneIt" folder in "SceneIt" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 9880C0EC2DF493A2008872D0 /* SceneIt */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		980017C42E35546200533B70 /* SceneIt */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				980017CA2E35555D00533B70 /* Exceptions for "SceneIt" folder in "SceneIt" target */,
+			);
+			path = SceneIt;
+			sourceTree = "<group>";
+		};
 		982EB51F2E2B304000A4FA60 /* models */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = models;
@@ -123,14 +146,6 @@
 		982EB55B2E2B350800A4FA60 /* App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = App;
-			sourceTree = "<group>";
-		};
-		9880C0EF2DF493A2008872D0 /* SceneIt */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				982EB55E2E2B3C8B00A4FA60 /* Exceptions for "SceneIt" folder in "SceneIt" target */,
-			);
-			path = SceneIt;
 			sourceTree = "<group>";
 		};
 		9880C1012DF493A5008872D0 /* SceneItTests */ = {
@@ -201,13 +216,13 @@
 		9880C0E42DF493A2008872D0 = {
 			isa = PBXGroup;
 			children = (
+				980017C42E35546200533B70 /* SceneIt */,
 				982EB5242E2B312400A4FA60 /* Utils */,
 				982EB5212E2B30D500A4FA60 /* Services */,
 				982EB51F2E2B304000A4FA60 /* models */,
 				982EB5492E2B34FB00A4FA60 /* Views */,
 				982EB55B2E2B350800A4FA60 /* App */,
 				982EB52A2E2B317700A4FA60 /* SIgnUpFLow */,
-				9880C0EF2DF493A2008872D0 /* SceneIt */,
 				9880C1012DF493A5008872D0 /* SceneItTests */,
 				9880C10B2DF493A5008872D0 /* SceneItUITests */,
 				9880C0EE2DF493A2008872D0 /* Products */,
@@ -237,17 +252,18 @@
 				9880C1C42DFF20CE008872D0 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
+				987F34512E3552180011620B /* PBXBuildRule */,
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				980017C42E35546200533B70 /* SceneIt */,
 				982EB51F2E2B304000A4FA60 /* models */,
 				982EB5212E2B30D500A4FA60 /* Services */,
 				982EB5242E2B312400A4FA60 /* Utils */,
 				982EB52A2E2B317700A4FA60 /* SIgnUpFLow */,
 				982EB5492E2B34FB00A4FA60 /* Views */,
 				982EB55B2E2B350800A4FA60 /* App */,
-				9880C0EF2DF493A2008872D0 /* SceneIt */,
 			);
 			name = SceneIt;
 			packageProductDependencies = (
@@ -583,7 +599,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.SceneIt;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.Yugen;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
@@ -623,7 +639,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.SceneIt;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alpha.Yugen;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";

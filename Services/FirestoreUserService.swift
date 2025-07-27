@@ -3,7 +3,7 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseAuth
-import FirebaseFirestoreSwift
+import FirebaseFirestore
 
 final class FirestoreUserService: ObservableObject {
     static let shared = FirestoreUserService()

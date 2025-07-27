@@ -2,7 +2,7 @@
 
 import Foundation
 import FirebaseFirestore
-import FirebaseFirestoreSwift
+import FirebaseFirestore
 
 final class FirestorePostService: ObservableObject {
     static let shared = FirestorePostService()
