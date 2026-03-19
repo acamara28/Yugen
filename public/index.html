@@ -1,0 +1,1859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yúgen — Find the Beautiful Route</title>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Tokens ─────────────────────────────────────────── */
+:root {
+  --panel-w:   360px;
+  --lav:       #8b7fc7;
+  --lav-2:     #a89bd4;
+  --lav-3:     #c4b8e8;
+  --lav-dim:   rgba(139,127,199,.10);
+  --lav-glow:  rgba(139,127,199,.22);
+  --ink:       #1e1a2e;
+  --ink-2:     #4a4468;
+  --ink-3:     #8a84a8;
+  --bg:        #f7f5ff;
+  --bg-2:      #f0edf9;
+  --bg-3:      #e8e3f4;
+  --border:    #ddd8f0;
+  --red:       #b94a4a;
+  --red-bg:    rgba(185,74,74,.06);
+  --red-border:rgba(185,74,74,.18);
+  --font-s:    'Pinyon Script', cursive;
+  --font-u:    'Outfit', sans-serif;
+  --ease:      cubic-bezier(.4,0,.2,1);
+  --r-sm:      8px;
+  --r-md:      10px;
+  --r-lg:      12px;
+}
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0 }
+html, body { height: 100%; overflow: hidden; font-family: var(--font-u) }
+
+/* ── Layout ─────────────────────────────────────────── */
+#app    { display: flex; height: 100vh; width: 100vw }
+#panel  {
+  width: var(--panel-w); min-width: var(--panel-w); height: 100%;
+  background: var(--bg); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; z-index: 10;
+  box-shadow: 2px 0 24px rgba(139,127,199,.09);
+  overflow: hidden;
+}
+#map-wrap { flex: 1; position: relative; background: #e8e4dc }
+#map      { position: absolute; inset: 0; width: 100%; height: 100% }
+
+/* ── Header ─────────────────────────────────────────── */
+.hdr {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 11px;
+  animation: fadeUp .4s var(--ease) both;
+}
+.logo-svg  { width: 30px; height: 30px; flex-shrink: 0 }
+.wordmark  { font-family: var(--font-s); font-size: 30px; color: var(--lav); line-height: 1 }
+.tagline   { font-size: 9px; font-weight: 400; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); margin-top: 2px }
+
+/* ── Feature tabs ───────────────────────────────────── */
+.tabs {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 0; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.tab {
+  padding: 11px 8px 10px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  font-family: var(--font-u); font-size: 11.5px; font-weight: 400; color: var(--ink-3);
+  cursor: pointer; text-align: center; transition: all .18s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.tab:hover { color: var(--ink-2); background: var(--bg) }
+.tab.active {
+  color: var(--lav); font-weight: 500;
+  border-bottom-color: var(--lav);
+  background: var(--bg);
+}
+.tab-icon { font-size: 14px }
+
+/* ── Scrollable body ────────────────────────────────── */
+.body {
+  flex: 1; overflow-y: auto;
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.body::-webkit-scrollbar { width: 3px }
+.body::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 2px }
+
+/* Feature panels — swap visibility via JS */
+.feature { display: flex; flex-direction: column; gap: 16px; animation: fadeUp .3s var(--ease) both }
+.feature.hidden { display: none }
+
+/* ── Labels ─────────────────────────────────────────── */
+.lbl {
+  font-size: 9px; font-weight: 500; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 9px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* ── Location input with GPS button ─────────────────── */
+.input-stack  { position: relative }
+.connector    { position: absolute; left: 15px; top: 40px; height: calc(100% - 48px); width: 1px; background: linear-gradient(to bottom, var(--lav), transparent); opacity: .22 }
+.iw           { position: relative; margin-bottom: 6px }
+.dot          { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 8px; height: 8px; border-radius: 50%; pointer-events: none; z-index: 2 }
+.dot.o        { background: var(--lav); box-shadow: 0 0 0 3px var(--lav-dim) }
+.dot.d        { background: transparent; border: 2px solid var(--ink-3) }
+input.ri {
+  width: 100%; padding: 10px 36px 10px 30px;
+  background: #fff; border: 1px solid var(--border); border-radius: var(--r-md);
+  font-family: var(--font-u); font-size: 13px; font-weight: 300; color: var(--ink);
+  outline: none; transition: border-color .2s, box-shadow .2s;
+}
+input.ri:focus  { border-color: var(--lav); box-shadow: 0 0 0 3px var(--lav-dim) }
+input.ri::placeholder { color: var(--ink-3) }
+.gps-btn {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; border-radius: 6px;
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-3); display: flex; align-items: center; justify-content: center;
+  transition: color .15s, background .15s; z-index: 2;
+}
+.gps-btn:hover { color: var(--lav); background: var(--lav-dim) }
+.gps-btn svg   { width: 14px; height: 14px }
+
+/* ── Autocomplete ── */
+.ac-wrap      { position: relative }
+.ac-dropdown  {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: #fff; border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: 0 4px 20px rgba(139,127,199,.15); z-index: 100;
+  overflow: hidden; display: none;
+}
+.ac-dropdown.open { display: block }
+.ac-item {
+  padding: 9px 13px; cursor: pointer;
+  border-bottom: 1px solid var(--border); transition: background .12s;
+  display: flex; align-items: flex-start; gap: 9px;
+}
+.ac-item:last-child { border-bottom: none }
+.ac-item:hover, .ac-item.selected { background: var(--lav-dim) }
+.ac-item.selected .ac-name { color: var(--lav) }
+.ac-icon  { font-size: 13px; margin-top: 1px; flex-shrink: 0; opacity: .6 }
+.ac-text  { flex: 1; min-width: 0 }
+.ac-name  { font-size: 12.5px; font-weight: 400; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.ac-sub   { font-size: 10.5px; font-weight: 300; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px }
+.ac-zip-badge {
+  font-size: 9px; font-weight: 600; letter-spacing: .08em;
+  background: var(--lav-dim); color: var(--lav);
+  border: 1px solid rgba(139,127,199,.3); border-radius: 4px;
+  padding: 1px 5px; flex-shrink: 0; margin-top: 2px; align-self: flex-start;
+}
+.ac-section {
+  padding: 5px 13px 4px; font-size: 9px; font-weight: 600;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3);
+  background: var(--bg-2); border-bottom: 1px solid var(--border);
+  pointer-events: none;
+}
+.ac-locked { background: var(--lav-dim) !important }
+.ac-locked-dot {
+  position: absolute; right: 36px; top: 50%; transform: translateY(-50%);
+  width: 7px; height: 7px; border-radius: 50%; background: var(--lav);
+  display: none;
+}
+.ac-locked-dot.on { display: block }
+
+/* ── Activity pills ─────────────────────────────────── */
+.modes  { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px }
+.mbtn {
+  padding: 9px 4px 8px; background: #fff; border: 1px solid var(--border); border-radius: var(--r-md);
+  font-family: var(--font-u); font-size: 11px; font-weight: 400; color: var(--ink-2);
+  cursor: pointer; text-align: center; transition: all .16s; line-height: 1.3;
+}
+.mbtn:hover  { border-color: var(--lav-2); color: var(--ink); background: var(--bg-2) }
+.mbtn.active { background: var(--lav-dim); border-color: var(--lav); color: var(--lav) }
+.micon       { display: block; font-size: 17px; margin-bottom: 3px }
+
+/* ── Distance selector (Loop mode) ─────────────────── */
+.dist-display {
+  text-align: center; padding: 14px 0 10px;
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: #fff; margin-bottom: 10px;
+}
+.dist-val {
+  font-family: var(--font-s); font-size: 48px; color: var(--lav);
+  line-height: 1; display: block; margin-bottom: 4px;
+}
+.dist-unit-wrap { display: flex; align-items: center; justify-content: center; gap: 6px }
+.unit-btn {
+  padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border);
+  font-family: var(--font-u); font-size: 10px; font-weight: 400; color: var(--ink-3);
+  background: none; cursor: pointer; transition: all .15s;
+}
+.unit-btn.active { background: var(--lav-dim); border-color: var(--lav); color: var(--lav); font-weight: 500 }
+.dist-slider-wrap { padding: 0 2px; margin-top: 6px }
+.dist-chips {
+  display: flex; gap: 5px; flex-wrap: wrap; margin-top: 10px;
+}
+.chip {
+  padding: 5px 11px; border-radius: 20px;
+  border: 1px solid var(--border); background: #fff;
+  font-family: var(--font-u); font-size: 11px; font-weight: 400; color: var(--ink-2);
+  cursor: pointer; transition: all .15s;
+}
+.chip:hover  { border-color: var(--lav-2); color: var(--lav); background: var(--lav-dim) }
+.chip.active { background: var(--lav-dim); border-color: var(--lav); color: var(--lav); font-weight: 500 }
+
+/* ── Shared range input ─────────────────────────────── */
+input[type=range] {
+  -webkit-appearance: none; width: 100%; height: 2px;
+  background: var(--bg-3); border-radius: 1px; outline: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--lav); border: 3px solid #fff;
+  box-shadow: 0 1px 6px rgba(139,127,199,.4); transition: transform .18s;
+}
+input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15) }
+
+/* ── Vibe preset cards ──────────────────────────────── */
+.vibes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.vibe {
+  position: relative; padding: 12px 10px 10px;
+  background: #fff; border: 1.5px solid var(--border); border-radius: var(--r-lg);
+  cursor: pointer; transition: all .18s var(--ease); text-align: left;
+  font-family: var(--font-u);
+}
+.vibe:hover  { border-color: var(--lav-2); background: var(--bg-2); transform: translateY(-1px) }
+.vibe.active { border-color: var(--lav); background: var(--lav-dim); box-shadow: 0 2px 14px var(--lav-glow) }
+.vibe-icon   { font-size: 20px; display: block; margin-bottom: 5px; line-height: 1 }
+.vibe-name   { font-size: 11.5px; font-weight: 500; color: var(--ink); display: block; margin-bottom: 1px }
+.vibe-desc   { font-size: 9.5px; font-weight: 300; color: var(--ink-3); line-height: 1.4; display: block }
+.vibe.active .vibe-name { color: var(--lav) }
+.vibe.active .vibe-desc { color: var(--ink-2) }
+.vibe-check {
+  position: absolute; top: 8px; right: 8px;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--lav); opacity: 0; transform: scale(.5);
+  transition: all .2s var(--ease);
+  display: flex; align-items: center; justify-content: center;
+}
+.vibe.active .vibe-check { opacity: 1; transform: scale(1) }
+.vibe-check::after {
+  content: ''; display: block; width: 8px; height: 8px;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 10 10' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2 5l2.5 2.5L8 3' stroke='white' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center/contain;
+}
+
+/* ── Fine-tune accordion ────────────────────────────── */
+.tune-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 9px; cursor: pointer; user-select: none;
+}
+.tune-label     { font-size: 10px; font-weight: 400; color: var(--ink-3) }
+.tune-label em  { color: var(--lav); font-style: normal; font-weight: 500 }
+.chevron        { width: 13px; height: 13px; color: var(--ink-3); transition: transform .24s var(--ease) }
+.chevron.open   { transform: rotate(180deg) }
+.sliders-wrap   { overflow: hidden; max-height: 0; opacity: 0; transition: max-height .32s var(--ease), opacity .25s }
+.sliders-wrap.open { max-height: 280px; opacity: 1 }
+.sliders        { display: flex; flex-direction: column; gap: 10px; padding-top: 11px }
+.sl-row         { }
+.sl-lbl         { display: flex; justify-content: space-between; font-size: 11px; font-weight: 300; color: var(--ink-2); margin-bottom: 4px }
+.sl-icon        { font-size: 10px; margin-right: 4px }
+.sv             { font-size: 11px; font-weight: 500; color: var(--lav); min-width: 12px; text-align: right }
+
+/* ── Generate button ────────────────────────────────── */
+.gen {
+  width: 100%; padding: 12px;
+  background: var(--lav); border: none; border-radius: 11px;
+  font-family: var(--font-s); font-size: 20px; color: #fff;
+  cursor: pointer; letter-spacing: .04em; position: relative; overflow: hidden;
+  transition: all .2s var(--ease);
+}
+.gen::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, transparent 40%, rgba(255,255,255,.11)); pointer-events: none }
+.gen:hover   { background: var(--ink-2); transform: translateY(-1px); box-shadow: 0 5px 22px var(--lav-glow) }
+.gen:active  { transform: translateY(0); box-shadow: none }
+.gen:disabled { opacity: .42; cursor: not-allowed; transform: none; box-shadow: none }
+
+/* ── Progress bar ───────────────────────────────────── */
+.lbar  { height: 2px; background: var(--bg-3); border-radius: 1px; overflow: hidden; opacity: 0; transition: opacity .3s; margin-bottom: 8px }
+.lbar.on { opacity: 1 }
+.lfill { height: 100%; width: 0%; background: linear-gradient(to right, var(--lav), var(--lav-3)); transition: width .45s ease }
+
+/* ── Error banner ───────────────────────────────────── */
+.err     { font-size: 11.5px; font-weight: 300; color: var(--red); padding: 9px 12px; background: var(--red-bg); border: 1px solid var(--red-border); border-radius: var(--r-sm); display: none; line-height: 1.5 }
+.err.on  { display: block }
+
+/* ── Result card ────────────────────────────────────── */
+.card { background: #fff; border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; display: none; opacity: 0; transform: translateY(8px); transition: opacity .38s, transform .38s }
+.card.on { opacity: 1; transform: translateY(0) }
+.card-hero { background: linear-gradient(135deg, var(--lav-dim), var(--bg-2)); padding: 14px 14px 10px; border-bottom: 1px solid var(--border) }
+.card-ttl  { font-family: var(--font-s); font-size: 22px; color: var(--lav); line-height: 1; margin-bottom: 5px }
+.card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
+.card-tag  { font-size: 9.5px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); background: rgba(255,255,255,.75); border: 1px solid var(--border); border-radius: 20px; padding: 2px 8px }
+.stats     { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; padding: 11px 13px; border-bottom: 1px solid var(--border) }
+.stat      { text-align: center; padding: 9px 4px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm) }
+.sv2       { font-family: var(--font-s); font-size: 18px; color: var(--lav); line-height: 1; margin-bottom: 3px }
+.slb       { font-size: 8px; font-weight: 400; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3) }
+.score-sec { padding: 11px 13px; border-bottom: 1px solid var(--border) }
+.srow      { display: flex; align-items: center; gap: 7px; margin-bottom: 7px }
+.srow:last-child { margin-bottom: 0 }
+.slabel    { font-size: 9px; font-weight: 500; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); min-width: 44px }
+.strack    { flex: 1; height: 3px; background: var(--bg-3); border-radius: 2px; overflow: hidden }
+.sfill     { height: 100%; border-radius: 2px; background: linear-gradient(to right, var(--lav), var(--lav-3)); width: 0%; transition: width 1.1s cubic-bezier(.4,0,.2,1) }
+.snum      { font-size: 11px; font-weight: 500; color: var(--lav); min-width: 26px; text-align: right }
+.hi        { padding: 10px 13px 13px }
+.hi-ttl    { font-size: 9px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 7px }
+.htag      { display: inline-block; padding: 3px 9px; background: var(--lav-dim); border: 1px solid rgba(139,127,199,.2); border-radius: 20px; font-size: 11px; font-weight: 300; color: var(--lav); margin: 0 4px 4px 0; transition: background .15s }
+.htag:hover { background: rgba(139,127,199,.18) }
+.retry-btn {
+  display: block; width: calc(100% - 26px); margin: 0 13px 13px;
+  padding: 8px; border: 1.5px dashed var(--border); border-radius: var(--r-sm);
+  background: none; font-family: var(--font-u); font-size: 11.5px; font-weight: 400;
+  color: var(--ink-3); cursor: pointer; transition: all .18s; text-align: center;
+}
+.retry-btn:hover { border-color: var(--lav-2); color: var(--lav); background: var(--lav-dim) }
+.alts { display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; padding: 11px 13px; border-bottom: 1px solid var(--border) }
+.alt-btn {
+  padding: 8px 4px 7px; background: #fff; border: 1.5px solid var(--border);
+  border-radius: var(--r-sm); font-family: var(--font-u); font-size: 10px;
+  font-weight: 400; color: var(--ink-2); cursor: pointer; transition: all .18s; text-align: center;
+}
+.alt-btn:hover { border-color: var(--lav-2); background: var(--bg-2) }
+.alt-btn.active { border-color: var(--lav); background: var(--lav-dim); color: var(--lav); font-weight: 500 }
+.alt-score { display: block; font-size: 13px; font-weight: 500; color: var(--lav); margin-bottom: 2px }
+.alt-km    { display: block; font-size: 9px; color: var(--ink-3) }
+.route-desc { font-size: 11px; font-weight: 300; color: var(--ink-2); line-height: 1.55;
+  padding: 9px 13px; border-bottom: 1px solid var(--border); font-style: italic }
+.score-drivers { padding: 8px 13px; }
+.score-driver-item { font-size: 10px; color: var(--ink-3); margin-bottom: 3px }
+
+/* ── Map overlays ───────────────────────────────────── */
+#badge {
+  position: absolute; top: 14px; right: 14px; z-index: 6;
+  background: rgba(255,255,255,.9); backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: 20px;
+  padding: 5px 13px; font-size: 11.5px; font-weight: 400; color: var(--ink-2);
+  box-shadow: 0 2px 12px rgba(0,0,0,.07);
+}
+
+/* ── Map loading skeleton ───────────────────────────── */
+#map-init {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #eceae2 0%, #dedad1 100%);
+  transition: opacity .5s ease;
+}
+#map-init.gone { opacity: 0; pointer-events: none }
+.init-icon { font-size: 40px; opacity: .35; margin-bottom: 12px }
+.init-txt  { font-size: 13px; font-weight: 300; color: #999; letter-spacing: .05em }
+
+/* ── Animations ─────────────────────────────────────── */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes pop    { 0% { transform: scale(.7) } 60% { transform: scale(1.1) } 100% { transform: scale(1) } }
+
+/* ── Mobile ─────────────────────────────────────────── */
+@media (max-width: 680px) {
+  #app    { flex-direction: column }
+  #panel  { width: 100%; min-width: unset; height: 58vh; border-right: none; border-bottom: 1px solid var(--border) }
+  #map-wrap { height: 42vh }
+  .vibes  { grid-template-columns: repeat(4,1fr) }
+  .vibe-desc { display: none }
+  .dist-val  { font-size: 36px }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Left panel ────────────────────────────────── -->
+  <div id="panel">
+
+    <!-- Header -->
+    <div class="hdr">
+      <svg class="logo-svg" viewBox="0 0 100 100" fill="none">
+        <path d="M50 6C36 6 25 17.5 25 31.5C25 50 50 74 50 74C50 74 75 50 75 31.5C75 17.5 64 6 50 6Z" fill="#8b7fc7"/>
+        <circle cx="50" cy="31" r="10" fill="#f7f5ff"/>
+        <path d="M8 90L30 62L44 76L50 70L56 76L70 62L92 90Z" fill="#8b7fc7" opacity=".72"/>
+      </svg>
+      <div>
+        <div class="wordmark">Yúgen</div>
+        <div class="tagline">Find the beautiful route</div>
+      </div>
+    </div>
+
+    <!-- Feature tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="dest" id="tab-dest">
+        <span class="tab-icon">📍</span> Destination
+      </button>
+      <button class="tab" data-tab="loop" id="tab-loop">
+        <span class="tab-icon">🔄</span> Distance Loop
+      </button>
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="body">
+
+      <!-- ══ DESTINATION FEATURE ══════════════════════ -->
+      <div class="feature" id="feat-dest">
+
+        <!-- Where to? -->
+        <div>
+          <div class="lbl">Where to?</div>
+          <div class="input-stack">
+            <div class="connector"></div>
+            <div class="iw ac-wrap">
+              <span class="dot o"></span>
+              <input class="ri" type="text" id="d-origin" placeholder="Start — address or place" autocomplete="off">
+              <span class="ac-locked-dot" id="d-origin-dot"></span>
+              <button class="gps-btn" id="d-gps" title="Use my location">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
+                </svg>
+              </button>
+              <div class="ac-dropdown" id="d-origin-ac"></div>
+            </div>
+            <div class="iw ac-wrap">
+              <span class="dot d"></span>
+              <input class="ri" type="text" id="d-dest" placeholder="End — where are you heading?" autocomplete="off">
+              <span class="ac-locked-dot" id="d-dest-dot"></span>
+              <div class="ac-dropdown" id="d-dest-ac"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- How -->
+        <div>
+          <div class="lbl">How</div>
+          <div class="modes" id="d-modes">
+            <button class="mbtn active" data-mode="bike" data-label="🚴 Cycling"><span class="micon">🚴</span>Cycling</button>
+            <button class="mbtn" data-mode="run" data-label="🏃 Running"><span class="micon">🏃</span>Running</button>
+            <button class="mbtn" data-mode="walk" data-label="🚶 Walking"><span class="micon">🚶</span>Walking</button>
+          </div>
+        </div>
+
+        <!-- Vibe -->
+        <div>
+          <div class="lbl">Vibe</div>
+          <div class="vibes" id="d-vibes">
+            <button class="vibe active" data-vibe="nature"><span class="vibe-check"></span><span class="vibe-icon">🌿</span><span class="vibe-name">Nature first</span><span class="vibe-desc">Parks, trees &amp; green paths</span></button>
+            <button class="vibe" data-vibe="water"><span class="vibe-check"></span><span class="vibe-icon">🌊</span><span class="vibe-name">Waterfront</span><span class="vibe-desc">Rivers, canals &amp; shores</span></button>
+            <button class="vibe" data-vibe="urban"><span class="vibe-check"></span><span class="vibe-icon">🏛</span><span class="vibe-name">Urban beauty</span><span class="vibe-desc">Architecture &amp; landmarks</span></button>
+            <button class="vibe" data-vibe="hidden"><span class="vibe-check"></span><span class="vibe-icon">🗺</span><span class="vibe-name">Off the map</span><span class="vibe-desc">Quiet &amp; hidden paths</span></button>
+          </div>
+          <div class="tune-row" id="d-tune-row">
+            <span class="tune-label">Want to <em>fine-tune?</em></span>
+            <svg class="chevron" id="d-caret" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5l4 4 4-4"/></svg>
+          </div>
+          <div class="sliders-wrap" id="d-sliders">
+            <div class="sliders">
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🌳</span>Nature</span><span class="sv" id="d-vn">7</span></div><input type="range" min="0" max="10" value="7" id="d-sn"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🏛</span>Architecture</span><span class="sv" id="d-va">6</span></div><input type="range" min="0" max="10" value="6" id="d-sa"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">💧</span>Water</span><span class="sv" id="d-vw">8</span></div><input type="range" min="0" max="10" value="8" id="d-sw"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🏔</span>Elevation</span><span class="sv" id="d-ve">5</span></div><input type="range" min="0" max="10" value="5" id="d-se"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🔇</span>Low traffic</span><span class="sv" id="d-vq">6</span></div><input type="range" min="0" max="10" value="6" id="d-sq"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action -->
+        <div>
+          <div class="lbar" id="d-lbar"><div class="lfill" id="d-lfill"></div></div>
+          <button class="gen" id="d-btn">Find the scenic route</button>
+        </div>
+        <div class="err" id="d-err"></div>
+
+        <!-- Result -->
+        <div class="card" id="d-card">
+          <div class="card-hero">
+            <div class="card-ttl">Your scenic route</div>
+            <div class="card-meta">
+              <span class="card-tag" id="d-vibe-tag">🌿 Nature first</span>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><div class="sv2" id="d-dist">—</div><div class="slb">Distance</div></div>
+            <div class="stat"><div class="sv2" id="d-time">—</div><div class="slb">Est. time</div></div>
+            <div class="stat"><div class="sv2" id="d-score">—</div><div class="slb">Scenic score</div></div>
+          </div>
+          <div class="score-sec">
+            <div class="srow"><span class="slabel">Nature</span><div class="strack"><div class="sfill" id="d-sf-n"></div></div><span class="snum" id="d-sn-n">—</span></div>
+            <div class="srow"><span class="slabel">Archit.</span><div class="strack"><div class="sfill" id="d-sf-a"></div></div><span class="snum" id="d-sn-a">—</span></div>
+            <div class="srow"><span class="slabel">Water</span><div class="strack"><div class="sfill" id="d-sf-w"></div></div><span class="snum" id="d-sn-w">—</span></div>
+            <div class="srow"><span class="slabel">Cycling</span><div class="strack"><div class="sfill" id="d-sf-b"></div></div><span class="snum" id="d-sn-b">—</span></div>
+            <div class="srow"><span class="slabel">Visual</span><div class="strack"><div class="sfill" id="d-sf-v"></div></div><span class="snum" id="d-sn-v">—</span></div>
+          </div>
+          <div class="alts" id="d-alts" style="display:none"></div>
+          <div class="route-desc" id="d-desc" style="display:none"></div>
+          <div class="hi"><div class="hi-ttl">Along your route</div><div id="d-tags"></div></div>
+          <div class="score-drivers" id="d-drivers" style="display:none"></div>
+        </div>
+
+      </div><!-- /feat-dest -->
+
+      <!-- ══ LOOP FEATURE ═════════════════════════════ -->
+      <div class="feature hidden" id="feat-loop">
+
+        <!-- Start point -->
+        <div>
+          <div class="lbl">Start from</div>
+          <div class="iw ac-wrap">
+            <span class="dot o"></span>
+            <input class="ri" type="text" id="l-origin" placeholder="Your location, or type an address" autocomplete="off">
+            <span class="ac-locked-dot" id="l-origin-dot"></span>
+            <button class="gps-btn" id="l-gps" title="Use my location">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
+              </svg>
+            </button>
+            <div class="ac-dropdown" id="l-origin-ac"></div>
+          </div>
+        </div>
+
+        <!-- Distance -->
+        <div>
+          <div class="lbl">
+            How far?
+            <div class="dist-unit-wrap" style="margin-bottom:0">
+              <button class="unit-btn active" data-unit="mi" id="unit-mi">mi</button>
+              <button class="unit-btn" data-unit="km" id="unit-km">km</button>
+            </div>
+          </div>
+          <div class="dist-display">
+            <span class="dist-val" id="l-dist-val">10</span>
+            <div class="dist-unit-wrap"><span style="font-size:13px;color:var(--ink-3);font-weight:300" id="l-unit-lbl">miles</span></div>
+          </div>
+          <div class="dist-slider-wrap">
+            <input type="range" min="1" max="50" value="10" id="l-slider">
+          </div>
+          <div class="dist-chips" id="l-chips">
+            <button class="chip" data-val="3">3 mi</button>
+            <button class="chip" data-val="5">5 mi</button>
+            <button class="chip active" data-val="10">10 mi</button>
+            <button class="chip" data-val="15">15 mi</button>
+            <button class="chip" data-val="20">20 mi</button>
+          </div>
+        </div>
+
+        <!-- How -->
+        <div>
+          <div class="lbl">How</div>
+          <div class="modes" id="l-modes">
+            <button class="mbtn active" data-mode="bike" data-label="🚴 Cycling"><span class="micon">🚴</span>Cycling</button>
+            <button class="mbtn" data-mode="run" data-label="🏃 Running"><span class="micon">🏃</span>Running</button>
+            <button class="mbtn" data-mode="walk" data-label="🚶 Walking"><span class="micon">🚶</span>Walking</button>
+          </div>
+        </div>
+
+        <!-- Vibe -->
+        <div>
+          <div class="lbl">Vibe</div>
+          <div class="vibes" id="l-vibes">
+            <button class="vibe active" data-vibe="nature"><span class="vibe-check"></span><span class="vibe-icon">🌿</span><span class="vibe-name">Nature first</span><span class="vibe-desc">Parks, trees &amp; green paths</span></button>
+            <button class="vibe" data-vibe="water"><span class="vibe-check"></span><span class="vibe-icon">🌊</span><span class="vibe-name">Waterfront</span><span class="vibe-desc">Rivers, canals &amp; shores</span></button>
+            <button class="vibe" data-vibe="urban"><span class="vibe-check"></span><span class="vibe-icon">🏛</span><span class="vibe-name">Urban beauty</span><span class="vibe-desc">Architecture &amp; landmarks</span></button>
+            <button class="vibe" data-vibe="hidden"><span class="vibe-check"></span><span class="vibe-icon">🗺</span><span class="vibe-name">Off the map</span><span class="vibe-desc">Quiet &amp; hidden paths</span></button>
+          </div>
+          <div class="tune-row" id="l-tune-row">
+            <span class="tune-label">Want to <em>fine-tune?</em></span>
+            <svg class="chevron" id="l-caret" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 5l4 4 4-4"/></svg>
+          </div>
+          <div class="sliders-wrap" id="l-sliders">
+            <div class="sliders">
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🌳</span>Nature</span><span class="sv" id="l-vn">7</span></div><input type="range" min="0" max="10" value="7" id="l-sn"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🏛</span>Architecture</span><span class="sv" id="l-va">6</span></div><input type="range" min="0" max="10" value="6" id="l-sa"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">💧</span>Water</span><span class="sv" id="l-vw">8</span></div><input type="range" min="0" max="10" value="8" id="l-sw"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🏔</span>Elevation</span><span class="sv" id="l-ve">5</span></div><input type="range" min="0" max="10" value="5" id="l-se"></div>
+              <div class="sl-row"><div class="sl-lbl"><span><span class="sl-icon">🔇</span>Low traffic</span><span class="sv" id="l-vq">6</span></div><input type="range" min="0" max="10" value="6" id="l-sq"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action -->
+        <div>
+          <div class="lbar" id="l-lbar"><div class="lfill" id="l-lfill"></div></div>
+          <button class="gen" id="l-btn">Generate my loop</button>
+        </div>
+        <div class="err" id="l-err"></div>
+
+        <!-- Result -->
+        <div class="card" id="l-card">
+          <div class="card-hero">
+            <div class="card-ttl">Your scenic loop</div>
+            <div class="card-meta">
+              <span class="card-tag" id="l-vibe-tag">🌿 Nature first</span>
+              <span class="card-tag" id="l-match-tag">—</span>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><div class="sv2" id="l-dist">—</div><div class="slb">Actual dist.</div></div>
+            <div class="stat"><div class="sv2" id="l-time">—</div><div class="slb">Est. time</div></div>
+            <div class="stat"><div class="sv2" id="l-score">—</div><div class="slb">Scenic score</div></div>
+          </div>
+          <div class="score-sec">
+            <div class="srow"><span class="slabel">Nature</span><div class="strack"><div class="sfill" id="l-sf-n"></div></div><span class="snum" id="l-sn-n">—</span></div>
+            <div class="srow"><span class="slabel">Archit.</span><div class="strack"><div class="sfill" id="l-sf-a"></div></div><span class="snum" id="l-sn-a">—</span></div>
+            <div class="srow"><span class="slabel">Water</span><div class="strack"><div class="sfill" id="l-sf-w"></div></div><span class="snum" id="l-sn-w">—</span></div>
+          </div>
+          <div class="hi"><div class="hi-ttl">Along your loop</div><div id="l-tags"></div></div>
+          <button class="retry-btn" id="l-retry">↺ Try a different loop</button>
+        </div>
+
+      </div><!-- /feat-loop -->
+
+    </div><!-- /body -->
+  </div><!-- /panel -->
+
+  <!-- ── Map ─────────────────────────────────────────── -->
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="map-init">
+      <div class="init-icon">🗺️</div>
+      <div class="init-txt">Loading map…</div>
+    </div>
+    <div id="badge">🚴 Cycling</div>
+  </div>
+
+</div><!-- /app -->
+
+<script>
+// ════════════════════════════════════════════════════════
+//  YUGEN APP — Modular Architecture
+//  Modules: CONFIG → STATE → MAP → API → UI → FEATURES → INIT
+// ════════════════════════════════════════════════════════
+
+// ── CONFIG ───────────────────────────────────────────────
+const CONFIG = {
+  MAPBOX_FALLBACK: '',
+  BACKEND: 'http://localhost:3001',   // ← swap to ngrok URL when sharing
+  OSRM_BASE: 'https://router.project-osrm.org/route/v1', // free, no key needed
+  ROUTE_TIMEOUT: 18000,
+};
+
+// Vibe presets → scenic weights
+const VIBES = {
+  nature: { nature:9, arch:4, water:6, elev:6, quiet:7, label:'🌿 Nature first' },
+  water:  { nature:5, arch:4, water:10, elev:5, quiet:7, label:'🌊 Waterfront' },
+  urban:  { nature:4, arch:10, water:5, elev:5, quiet:4, label:'🏛 Urban beauty' },
+  hidden: { nature:6, arch:5, water:5, elev:4, quiet:10, label:'🗺 Off the map' },
+};
+
+// Miles to km conversion
+const MI_TO_KM = 1.60934;
+
+// ── STATE ────────────────────────────────────────────────
+// Single source of truth — never mutate directly outside STATE.set()
+const STATE = {
+  _s: {
+    tab:       'dest',       // 'dest' | 'loop'
+    mode:      'bike',       // 'bike' | 'foot'
+    vibe:      'nature',     // keyof VIBES
+    unit:      'mi',         // 'mi' | 'km'
+    loopDist:  10,           // target distance in miles (internal)
+    token:     null,
+    loopSeed:  0,            // increments on retry to vary the loop
+  },
+  get: (k)    => STATE._s[k],
+  set: (k, v) => { STATE._s[k] = v },
+};
+
+// ── DOM shorthand ────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const $$ = sel => document.querySelectorAll(sel);
+
+// ── MAP MODULE ───────────────────────────────────────────
+// Named MapGL (not Map) — avoids shadowing the built-in Map constructor
+const MapGL = (() => {
+  let map = null, ready = false;
+  const pins = {};
+
+  function hasWebGL() {
+    try {
+      const c = document.createElement('canvas');
+      return !!(c.getContext('webgl') || c.getContext('experimental-webgl'));
+    } catch { return false; }
+  }
+
+  function showMapError(msg) {
+    const el = $('map-init');
+    el.innerHTML = `<div style="text-align:center;padding:32px;max-width:320px">
+      <div style="font-size:36px;margin-bottom:12px;opacity:.4">⚠️</div>
+      <div style="font-size:14px;font-weight:500;color:#555;margin-bottom:8px">Map couldn't load</div>
+      <div style="font-size:12px;font-weight:300;color:#999;line-height:1.7">${msg}</div></div>`;
+  }
+
+  async function init(token) {
+    if (map) return;
+    if (!hasWebGL()) {
+      showMapError('WebGL is not supported by your browser. Try Chrome or Firefox.');
+      return;
+    }
+    if (!token || !token.startsWith('pk.')) {
+      showMapError('Mapbox token is missing. Add it to CONFIG.MAPBOX_FALLBACK in the HTML.');
+      return;
+    }
+    mapboxgl.accessToken = token;
+    map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/outdoors-v12',
+      center: [-73.9857, 40.7484],
+      zoom: 12,
+      failIfMajorPerformanceCaveat: false,
+    });
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+    map.addControl(new mapboxgl.ScaleControl(), 'bottom-right');
+    return new Promise((res) => {
+      map.on('load', () => {
+        ready = true;
+        $('map-init').classList.add('gone');
+        res();
+      });
+      map.on('error', e => {
+        console.error('[Mapbox error]', e);
+        if (e.error?.status === 401 || e.error?.status === 403) {
+          showMapError('Mapbox token is invalid or expired. Update CONFIG.MAPBOX_FALLBACK.');
+        }
+        // Non-auth errors are non-fatal — resolve so the UI keeps working
+        if (!ready) { ready = true; $('map-init').classList.add('gone'); res(); }
+      });
+    });
+  }
+
+  function ensureReady() {
+    if (ready) return Promise.resolve();
+    if (!map)  return Promise.reject(new Error('Map not initialised — call MapGL.init() first'));
+    return new Promise(r => map.on('load', r));
+  }
+
+  function drawRoute(geometry, color = '#8b7fc7') {
+    ['y-glow', 'y-line'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id) });
+    if (map.getSource('y')) map.removeSource('y');
+    map.addSource('y', { type: 'geojson', data: { type: 'Feature', geometry } });
+    map.addLayer({ id: 'y-glow', type: 'line', source: 'y',
+      paint: { 'line-color': color, 'line-opacity': .18, 'line-width': 16, 'line-blur': 10 } });
+    map.addLayer({ id: 'y-line', type: 'line', source: 'y',
+      paint: { 'line-color': color, 'line-opacity': .9, 'line-width': 5, 'line-cap': 'round', 'line-join': 'round' } });
+    const coords = geometry.coordinates;
+    const bounds = coords.reduce((b, p) => b.extend(p), new mapboxgl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 36, right: 60 }, maxZoom: 16 });
+  }
+
+  function pin(lngLat, type) {
+    if (pins[type]) pins[type].remove();
+    const el = document.createElement('div');
+    const isOrigin = type === 'o';
+    el.style.cssText = `width:${isOrigin?13:11}px;height:${isOrigin?13:11}px;border-radius:50%;` +
+      `background:${isOrigin?'#8b7fc7':'#1e1a2e'};border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.22)`;
+    pins[type] = new mapboxgl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
+  }
+
+  function clearPins() {
+    Object.values(pins).forEach(p => p.remove());
+    Object.keys(pins).forEach(k => delete pins[k]);
+  }
+
+  return { init, ensureReady, drawRoute, pin, clearPins, get ready() { return ready } };
+})();  // MapGL
+
+// ── API MODULE ───────────────────────────────────────────
+// Strategy: backend first for all route requests (scenic scoring included).
+// If backend is offline → fall back to direct GraphHopper + placeholder scorer.
+// This means the app always works, backend just makes it smarter.
+
+const API = {
+
+  // ── Token ──────────────────────────────────────────────
+  async getToken() {
+    try {
+      const r = await fetch(`${CONFIG.BACKEND}/api/config`, { signal: AbortSignal.timeout(3000) });
+      if (!r.ok) throw new Error('no config');
+      const d = await r.json();
+      return d.mapboxToken || CONFIG.MAPBOX_FALLBACK;
+    } catch {
+      return CONFIG.MAPBOX_FALLBACK;
+    }
+  },
+
+  // ── Geocode (always direct — fast, uses token already in STATE) ──
+  // ── Geocode — uses locked coords if user picked a suggestion ──
+  // Only falls back to API if no suggestion was selected (e.g. GPS fill)
+  async geocode(query, inputId = null) {
+    // If user selected a suggestion, use those exact coords — no API call
+    if (inputId) {
+      const locked = Autocomplete.getCoords(inputId);
+      if (locked) return locked;
+    }
+    // Fallback: geocode the text, biased toward NYC
+    const token = STATE.get('token');
+    const r = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json` +
+      `?access_token=${token}&limit=1&proximity=-73.9857,40.7484&bbox=-74.259090,40.477399,-73.700009,40.917577`
+    );
+    const d = await r.json();
+    if (!d.features?.length) throw new Error(`Location not found: "${query}"`);
+    return d.features[0].center;
+  },
+
+  // ── GPS ────────────────────────────────────────────────
+  async geolocate() {
+    return new Promise((res, rej) =>
+      navigator.geolocation.getCurrentPosition(
+        p => res([p.coords.longitude, p.coords.latitude]),
+        () => rej(new Error('Location access denied — please type your address'))
+      )
+    );
+  },
+
+  // ── Destination route ────────────────────────────────────────
+  // Priority: scenic-route (Panoramic A*) → /api/route (OSRM+score) → direct OSRM
+  async fetchDestRoute(origin, dest, mode) {
+    const weights = UI.getWeights('d');
+    const headers = { 'Content-Type': 'application/json' };
+
+    // Always send the address text for logging + fallback geocoding.
+    // Also send locked autocomplete coords so server can skip geocoding entirely.
+    const body = JSON.stringify({
+      origin,
+      destination:  dest,
+      originCoords: Autocomplete.getCoords('d-origin'),
+      destCoords:   Autocomplete.getCoords('d-dest'),
+      mode, weights, mapboxToken: STATE.get('token'),
+    });
+
+    // 1. Yugen Panoramic A* — returns three alternatives
+    try {
+      const r = await fetch(`${CONFIG.BACKEND}/api/scenic-route`, {
+        method: 'POST', headers, body,
+        signal: AbortSignal.timeout(CONFIG.ROUTE_TIMEOUT),
+      });
+      if (!r.ok) throw new Error(`scenic-route ${r.status}`);
+      const data = await r.json();
+      const rec  = data.recommended;
+      console.log(`[API] Panoramic A* — ${data.alternatives?.length} alternatives, score ${rec.scenicScore}/10`);
+      return {
+        geometry:     rec.route.geometry,
+        distance:     rec.route.distance,
+        duration:     rec.route.duration,
+        coords:       rec.route.geometry.coordinates,
+        // Flat scenic object — all fields directly accessible
+        scenic: {
+          composite:    rec.scenicScore,
+          nature:       rec.breakdown.nature,
+          architecture: rec.breakdown.architecture,
+          water:        rec.breakdown.water,
+          quiet:        rec.breakdown.quiet        ?? 0,
+          bike:         rec.breakdown.bike         ?? 0,
+          visual:       rec.breakdown.visual       ?? 0,
+          highlights:   rec.highlights,
+          description:  rec.routeDescription,
+          scoreDrivers: rec.scoreDrivers,
+        },
+        alternatives: data.alternatives,
+        viaBackend:   true,
+      };
+    } catch (e) {
+      console.warn('[API] scenic-route failed, trying /api/route:', e.message);
+    }
+
+    // 2. OSRM + Overpass fallback
+    try {
+      const r = await fetch(`${CONFIG.BACKEND}/api/route`, {
+        method: 'POST', headers, body,
+        signal: AbortSignal.timeout(CONFIG.ROUTE_TIMEOUT),
+      });
+      if (!r.ok) throw new Error(`api/route ${r.status}`);
+      const data = await r.json();
+      return {
+        geometry:     data.route.geometry,
+        distance:     data.route.distance,
+        duration:     data.route.duration,
+        coords:       data.route.geometry.coordinates,
+        scenic: {
+          composite:    data.scenicScore,
+          nature:       data.breakdown.nature,
+          architecture: data.breakdown.architecture,
+          water:        data.breakdown.water,
+          quiet:        data.breakdown.quiet        ?? 0,
+          bike:         data.breakdown.bike         ?? 0,
+          visual:       data.breakdown.visual       ?? 0,
+          highlights:   data.highlights,
+          description:  data.description,
+          scoreDrivers: data.scoreDrivers,
+        },
+        viaBackend: true,
+      };
+    } catch (e) {
+      console.warn('[API] Backend offline, routing direct:', e.message);
+    }
+
+    // 3. Last resort — direct OSRM, no scenic scoring
+    const oc = Autocomplete.getCoords('d-origin') || origin;
+    const dc = Autocomplete.getCoords('d-dest')   || dest;
+    return this._directRoute(oc, dc, mode);
+  },
+
+  // ── Loop route: try backend → fallback direct ─────────
+  async fetchLoop(origin, distMeters, mode, seed = 0) {
+    const weights = UI.getWeights('l');
+    try {
+      const r = await fetch(`${CONFIG.BACKEND}/api/loop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin,
+          originCoords:   Autocomplete.getCoords('l-origin'),
+          distanceMeters: distMeters, mode, seed, weights,
+          mapboxToken:    STATE.get('token'),
+        }),
+        signal: AbortSignal.timeout(CONFIG.ROUTE_TIMEOUT),
+      });
+      if (!r.ok) throw new Error(`Backend ${r.status}`);
+      const data = await r.json();
+      return {
+        geometry:  data.route.geometry,
+        distance:  data.route.distance,
+        duration:  data.route.duration,
+        coords:    data.route.geometry.coordinates,
+        scenic: {
+          composite:    data.scenicScore,
+          nature:       data.breakdown?.nature       ?? 0,
+          architecture: data.breakdown?.architecture ?? 0,
+          water:        data.breakdown?.water        ?? 0,
+          quiet:        data.breakdown?.quiet        ?? 0,
+          bike:         data.breakdown?.bike         ?? 0,
+          visual:       data.breakdown?.visual       ?? 0,
+          highlights:   data.highlights,
+          description:  data.description,
+          scoreDrivers: data.scoreDrivers,
+        },
+        matchInfo:  data.matchInfo,
+        viaBackend: true,
+      };
+    } catch (backendErr) {
+      console.warn('[API] Backend offline, loop direct:', backendErr.message);
+      return this._directLoop(origin, distMeters, mode, seed);
+    }
+  },
+
+  // ── Scenic score: try backend → fallback placeholder ──
+  // Only called when routing was done direct (backend offline)
+  async score(coords, weights) {
+    try {
+      const r = await fetch(`${CONFIG.BACKEND}/api/score`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coords, weights }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) throw new Error('score api error');
+      const d = await r.json();
+      // Normalise — same shape as route.scenic everywhere
+      return {
+        composite:    d.composite    ?? 0,
+        nature:       d.nature       ?? 0,
+        architecture: d.architecture ?? 0,
+        water:        d.water        ?? 0,
+        quiet:        d.quiet        ?? 0,
+        bike:         d.bike         ?? 0,
+        visual:       d.visual       ?? 0,
+        highlights:   d.highlights   ?? [],
+        description:  d.description  ?? '',
+        scoreDrivers: d.scoreDrivers ?? [],
+      };
+    } catch {
+      return this._placeholderScore(coords, weights);
+    }
+  },
+
+  // ── Direct OSRM fallbacks (backend offline) ─────────────
+  // OSRM is free, no API key — safe to call direct from browser
+  _osrmProfile(mode) {
+    return mode === 'bike' ? 'bike' : 'foot';
+  },
+
+  async _directRoute(origin, dest, mode, originId = null, destId = null) {
+    const [o, d] = await Promise.all([
+      Array.isArray(origin) ? origin : this.geocode(origin, originId),
+      Array.isArray(dest)   ? dest   : this.geocode(dest,   destId),
+    ]);
+    const profile = this._osrmProfile(mode);
+    const url = `${CONFIG.OSRM_BASE}/${profile}/${o[0]},${o[1]};${d[0]},${d[1]}` +
+      `?overview=full&geometries=geojson&steps=false`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(CONFIG.ROUTE_TIMEOUT) });
+    const j = await r.json();
+    if (j.code !== 'Ok') throw new Error(j.message || 'Route not found');
+    const p = j.routes[0];
+    return { geometry: p.geometry, distance: p.distance, duration: p.duration * 1000,
+             coords: p.geometry.coordinates, origin: o, dest: d, viaBackend: false };
+  },
+
+  async _directLoop(origin, distMeters, mode, seed) {
+    const o = Array.isArray(origin) ? origin : await this.geocode(origin);
+    const profile   = this._osrmProfile(mode);
+    const radiusDeg = (distMeters / (2 * Math.PI)) / 111320;
+    const seedAngle = (seed * 137.5) % 360;
+    const waypoints = [0, 120, 240].map(offset => {
+      const angle = ((seedAngle + offset) * Math.PI) / 180;
+      return [o[0] + Math.cos(angle) * radiusDeg, o[1] + Math.sin(angle) * radiusDeg];
+    });
+    const pts = [o, ...waypoints, o].map(p => `${p[0]},${p[1]}`).join(';');
+    const url = `${CONFIG.OSRM_BASE}/${profile}/${pts}?overview=full&geometries=geojson&steps=false`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(CONFIG.ROUTE_TIMEOUT) });
+    const j = await r.json();
+    if (j.code !== 'Ok') throw new Error(j.message || 'Loop not found');
+    const p = j.routes[0];
+    return { geometry: p.geometry, distance: p.distance, duration: p.duration * 1000,
+             coords: p.geometry.coordinates, origin: o, viaBackend: false };
+  },
+
+  // ── Placeholder scorer (no backend, no OSM data) ──────
+  _placeholderScore(coords, weights) {
+    const seed = coords.reduce((s, p) => s + Math.abs(p[0]) + Math.abs(p[1]), 0);
+    const rnd  = n => { const x = Math.sin(seed*n + n*7.3)*43758.5; return x - Math.floor(x) };
+    const w    = weights;
+    const nature = 0.28 + rnd(1) * .68;
+    const arch   = 0.20 + rnd(2) * .70;
+    const water  = 0.18 + rnd(3) * .72;
+    const composite = Math.min(10,
+      nature * (w.nature/10) * 3.6 +
+      arch   * (w.arch/10)   * 3.0 +
+      water  * (w.water/10)  * 3.4
+    );
+    return {
+      composite:    +composite.toFixed(1),
+      nature:       +(nature*10).toFixed(1),
+      architecture: +(arch*10).toFixed(1),
+      water:        +(water*10).toFixed(1),
+      highlights:   [
+        nature > .55 && '🌿 Tree-lined streets',
+        water  > .52 && '💧 Waterfront path',
+        arch   > .50 && '🏛 Historic district',
+        nature > .42 && '🏞 Park passage',
+        water  > .65 && '🌊 River views',
+      ].filter(Boolean).slice(0, 4),
+    };
+  },
+};
+
+// ── UI MODULE ─────────────────────────────────────────────
+const UI = {
+  // Tab switching
+  switchTab(tab) {
+    STATE.set('tab', tab);
+    $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    $('feat-dest').classList.toggle('hidden', tab !== 'dest');
+    $('feat-loop').classList.toggle('hidden', tab !== 'loop');
+    localStorage.setItem('yugen_tab', tab);
+  },
+
+  // Mode buttons (scoped to a container)
+  setMode(container, btn) {
+    container.querySelectorAll('.mbtn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    STATE.set('mode', btn.dataset.mode);
+    $('badge').textContent = btn.dataset.label;
+  },
+
+  // Vibe cards (scoped to a container)
+  setVibe(container, btn) {
+    container.querySelectorAll('.vibe').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const key = btn.dataset.vibe;
+    STATE.set('vibe', key);
+    // Sync sliders in this container's section
+    const prefix = container.id === 'd-vibes' ? 'd' : 'l';
+    const v = VIBES[key];
+    [['n',v.nature],['a',v.arch],['w',v.water],['e',v.elev],['q',v.quiet]].forEach(([k,val]) => {
+      const sl = $(`${prefix}-s${k}`);
+      const vl = $(`${prefix}-v${k}`);
+      if (sl) sl.value = val;
+      if (vl) vl.textContent = val;
+    });
+    // Pop animation
+    const check = btn.querySelector('.vibe-check');
+    check.style.animation = 'none';
+    requestAnimationFrame(() => { check.style.animation = 'pop .28s var(--ease) both' });
+  },
+
+  getWeights(prefix) {
+    // If a vibe is active and sliders haven't been touched, use vibe weights
+    const v = VIBES[STATE.get('vibe')];
+    return {
+      nature: +($(`${prefix}-sn`)?.value ?? v.nature),
+      arch:   +($(`${prefix}-sa`)?.value ?? v.arch),
+      water:  +($(`${prefix}-sw`)?.value ?? v.water),
+      elev:   +($(`${prefix}-se`)?.value ?? v.elev),
+      quiet:  +($(`${prefix}-sq`)?.value ?? v.quiet),
+    };
+  },
+
+  // Accordion toggle
+  toggleAccordion(sliders, caret) {
+    const open = sliders.classList.toggle('open');
+    caret.classList.toggle('open', open);
+  },
+
+  setLoad(prefix, pct) {
+    const bar  = $(`${prefix}-lbar`);
+    const fill = $(`${prefix}-lfill`);
+    bar.classList.toggle('on', pct > 0 && pct < 100);
+    fill.style.width = pct + '%';
+  },
+
+  showErr(prefix, msg) {
+    const el = $(`${prefix}-err`);
+    el.textContent = msg;
+    el.classList.add('on');
+    setTimeout(() => el.classList.remove('on'), 6000);
+  },
+
+  showCard(prefix, route, scenic, vibeLabel, extraTag = null) {
+    const isKm = STATE.get('unit') === 'km';
+    const km = (route.distance / 1000).toFixed(1);
+    const mi = (route.distance / 1000 / MI_TO_KM).toFixed(1);
+    const distStr = isKm ? km + 'km' : mi + 'mi';
+    const mins = Math.round(route.duration / 60000);
+    const timeStr = mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : mins + 'm';
+
+    $(`${prefix}-dist`).textContent  = distStr;
+    $(`${prefix}-time`).textContent  = timeStr;
+    $(`${prefix}-score`).textContent = scenic.composite + '/10';
+    $(`${prefix}-vibe-tag`).textContent = vibeLabel;
+    if (extraTag && $(`${prefix}-match-tag`)) $(`${prefix}-match-tag`).textContent = extraTag;
+
+    setTimeout(() => {
+      [['n', scenic.nature], ['a', scenic.architecture ?? scenic.arch], ['w', scenic.water], ['b', scenic.bike ?? 0], ['v', scenic.visual ?? 0]].forEach(([k, v]) => {
+        const fill = $(`${prefix}-sf-${k}`);
+        const num  = $(`${prefix}-sn-${k}`);
+        if (fill) fill.style.width = (v * 10) + '%';
+        if (num)  num.textContent  = (+v).toFixed(1);
+      });
+    }, 80);
+
+    $(`${prefix}-tags`).innerHTML = (scenic.highlights || [])
+      .map(h => `<span class="htag">${h}</span>`).join('');
+
+    const card = $(`${prefix}-card`);
+    card.style.display = 'block';
+    requestAnimationFrame(() => card.classList.add('on'));
+  },
+
+  resetCard(prefix) {
+    const card = $(`${prefix}-card`);
+    card.classList.remove('on');
+    card.style.display = 'none';
+    const desc = $(`${prefix}-desc`);
+    if (desc) { desc.style.display = 'none'; desc.textContent = ''; }
+    const alts = $(`${prefix}-alts`);
+    if (alts) { alts.style.display = 'none'; alts.innerHTML = ''; }
+    const drv = $(`${prefix}-drivers`);
+    if (drv) { drv.style.display = 'none'; drv.innerHTML = ''; }
+    // Close any open autocomplete dropdowns
+    [`${prefix}-origin-ac`, `${prefix}-dest-ac`].forEach(id => {
+      const dd = $(id);
+      if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+    });
+  },
+
+  // Show 3 route alternatives as clickable pills
+  showAlternatives(prefix, alternatives, currentRoute) {
+    const container = $(`${prefix}-alts`);
+    if (!container || !alternatives?.length) return;
+
+    const icons = { efficient: '⚡', balanced: '⚖', scenic: '🌿' };
+    container.innerHTML = alternatives.map((alt, i) => {
+      const km  = alt.route ? (alt.route.distance/1000).toFixed(1) : '—';
+      const sc  = alt.scenicScore ?? '—';
+      const ico = icons[alt.label] ?? '·';
+      const isActive = alt.label === 'balanced' ? 'active' : '';
+      return `<button class="alt-btn ${isActive}" data-idx="${i}" title="${alt.description}">
+        <span class="alt-score">${ico} ${sc}/10</span>
+        <span>${alt.label}</span>
+        <span class="alt-km">${km}km</span>
+      </button>`;
+    }).join('');
+
+    container.style.display = 'grid';
+
+    // Switch route on map when user picks a different alternative
+    container.querySelectorAll('.alt-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = +btn.dataset.idx;
+        const alt = alternatives[idx];
+        if (!alt?.route?.geometry) return;
+
+        container.querySelectorAll('.alt-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Redraw the map with the selected alternative
+        MapGL.clearPins();
+        const coords = alt.route.geometry.coordinates;
+        MapGL.pin(coords[0], 'o');
+        MapGL.pin(coords[coords.length-1], 'd');
+        MapGL.drawRoute(alt.route.geometry);
+
+        // Update stats
+        const prefix2 = prefix;
+        const km = (alt.route.distance/1000).toFixed(1);
+        const mi = (alt.route.distance/1000/1.60934).toFixed(1);
+        $(`${prefix2}-dist`).textContent = STATE.get('unit') === 'km' ? km+'km' : mi+'mi';
+        const mins = Math.round(alt.route.duration/60000);
+        $(`${prefix2}-time`).textContent = mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : mins+'m';
+        $(`${prefix2}-score`).textContent = (alt.scenicScore ?? '—') + '/10';
+
+        // Update all score bars
+        if (alt.breakdown) {
+          setTimeout(() => {
+            [
+              ['n', alt.breakdown.nature],
+              ['a', alt.breakdown.architecture],
+              ['w', alt.breakdown.water],
+              ['b', alt.breakdown.bike   ?? 0],
+              ['v', alt.breakdown.visual ?? 0],
+            ].forEach(([k, v]) => {
+              const fill = $(`${prefix2}-sf-${k}`);
+              const num  = $(`${prefix2}-sn-${k}`);
+              if (fill) fill.style.width = (v * 10) + '%';
+              if (num)  num.textContent  = (+v).toFixed(1);
+            });
+          }, 60);
+        }
+
+        // Update tags
+        if (alt.highlights) {
+          $(`${prefix2}-tags`).innerHTML = alt.highlights.map(h=>`<span class="htag">${h}</span>`).join('');
+        }
+
+        // Update description
+        const desc = $(`${prefix2}-desc`);
+        if (desc && alt.routeDescription) {
+          desc.textContent = alt.routeDescription;
+          desc.style.display = 'block';
+        }
+      });
+    });
+  },
+
+  setBtnState(id, loading, label) {
+    const btn = $(id);
+    btn.disabled = loading;
+    btn.textContent = loading ? label : btn.dataset.default;
+  },
+};
+
+// ── FEATURES ──────────────────────────────────────────────
+const Destination = {
+  async go() {
+    const orig = $('d-origin').value.trim();
+    const dest = $('d-dest').value.trim();
+    if (!orig) return UI.showErr('d', 'Enter a starting location.');
+    if (!dest) return UI.showErr('d', 'Enter a destination.');
+    $('d-err').classList.remove('on');
+    UI.resetCard('d');
+    UI.setLoad('d', 10);
+    $('d-btn').disabled = true;
+    $('d-btn').textContent = 'Finding your route…';
+
+    try {
+      await MapGL.ensureReady();
+      UI.setLoad('d', 25);
+
+      const route  = await API.fetchDestRoute(orig, dest, STATE.get('mode'));
+      UI.setLoad('d', 70);
+
+      // route.scenic is already a flat object with all fields.
+      // For direct OSRM fallback (backend offline), score separately.
+      const weights = UI.getWeights('d');
+      const scenic  = route.viaBackend
+        ? route.scenic
+        : await API.score(route.coords, weights);
+      UI.setLoad('d', 90);
+
+      // Pin placement: backend gives coords directly, fallback sets origin/dest
+      const originLL = route.origin ?? route.coords[0];
+      const destLL   = route.dest   ?? route.coords[route.coords.length - 1];
+      MapGL.clearPins();
+      MapGL.pin(originLL, 'o');
+      MapGL.pin(destLL,   'd');
+      MapGL.drawRoute(route.geometry);
+
+      const vibeKey = STATE.get('vibe');
+      UI.showCard('d', route, scenic, VIBES[vibeKey]?.label ?? '✦ Custom');
+
+      // Show alternatives selector if backend returned them
+      if (route.alternatives?.length > 1) {
+        UI.showAlternatives('d', route.alternatives, route);
+      }
+      // Show natural language description
+      if (scenic.description) {
+        const desc = $('d-desc');
+        desc.textContent = scenic.description;
+        desc.style.display = 'block';
+      }
+      // Show score drivers (transparency)
+      if (scenic.scoreDrivers?.length) {
+        const drv = $('d-drivers');
+        drv.innerHTML = '<div style="font-size:9px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px">What drove this score</div>' +
+          scenic.scoreDrivers.map(d => `<div class="score-driver-item">· ${d}</div>`).join('');
+        drv.style.display = 'block';
+      }
+      UI.setLoad('d', 100);
+
+    } catch (e) {
+      UI.showErr('d', e.message || 'Something went wrong — try again');
+      console.error('[Dest]', e);
+    } finally {
+      $('d-btn').disabled = false;
+      $('d-btn').textContent = 'Find the scenic route';
+      setTimeout(() => UI.setLoad('d', 0), 800);
+    }
+  },
+};
+
+const Loop = {
+  async go(isRetry = false) {
+    const orig = $('l-origin').value.trim();
+    if (!orig) return UI.showErr('l', 'Enter a starting location.');
+    $('l-err').classList.remove('on');
+    UI.resetCard('l');
+    UI.setLoad('l', 10);
+    $('l-btn').disabled = true;
+    $('l-btn').textContent = isRetry ? 'Trying another loop…' : 'Building your loop…';
+
+    if (isRetry) STATE.set('loopSeed', STATE.get('loopSeed') + 1);
+    else STATE.set('loopSeed', Math.floor(Math.random() * 1000));
+
+    try {
+      await MapGL.ensureReady();
+      UI.setLoad('l', 25);
+
+      // Convert target distance to meters
+      const distMi   = STATE.get('loopDist');
+      const distM    = distMi * MI_TO_KM * 1000;
+      const route    = await API.fetchLoop(orig, distM, STATE.get('mode'), STATE.get('loopSeed'));
+      UI.setLoad('l', 70);
+
+      const weights  = UI.getWeights('l');
+      const scenic   = route.viaBackend
+        ? route.scenic
+        : await API.score(route.coords, weights);
+      UI.setLoad('l', 90);
+
+      const originLL = route.origin ?? route.coords[0];
+      MapGL.clearPins();
+      MapGL.pin(originLL, 'o');
+      MapGL.drawRoute(route.geometry);
+
+      // Match tag: use backend matchInfo if available, else calculate
+      let matchTag;
+      if (route.matchInfo) {
+        const d = route.matchInfo.diffKm;
+        matchTag = d < 0.5 ? '✓ Perfect match' : `~${d}km off target`;
+      } else {
+        const actualMi = (route.distance / 1000 / MI_TO_KM).toFixed(1);
+        const diff     = Math.abs(actualMi - distMi).toFixed(1);
+        matchTag = diff < 0.5 ? '✓ Perfect match' : `~${diff} mi off target`;
+      }
+
+      const vibeKey = STATE.get('vibe');
+      UI.showCard('l', route, scenic, VIBES[vibeKey]?.label ?? '✦ Custom', matchTag);
+      UI.setLoad('l', 100);
+
+    } catch (e) {
+      UI.showErr('l', e.message || 'Something went wrong — try again');
+      console.error('[Loop]', e);
+    } finally {
+      $('l-btn').disabled = false;
+      $('l-btn').textContent = 'Generate my loop';
+      setTimeout(() => UI.setLoad('l', 0), 800);
+    }
+  },
+};
+
+// ── DISTANCE / UNIT CONTROLS ──────────────────────────────
+function updateDistDisplay() {
+  const mi   = STATE.get('loopDist');
+  const isKm = STATE.get('unit') === 'km';
+  const val  = isKm ? (mi * MI_TO_KM).toFixed(1) : mi;
+  $('l-dist-val').textContent = isKm ? +val : val;
+  $('l-unit-lbl').textContent = isKm ? 'kilometres' : 'miles';
+  // Sync chip labels
+  const chips = [3, 5, 10, 15, 20];
+  $$('#l-chips .chip').forEach((c, i) => {
+    const chipMi = chips[i];
+    c.textContent = isKm ? (chipMi * MI_TO_KM).toFixed(0) + ' km' : chipMi + ' mi';
+    c.dataset.val = chipMi;
+  });
+}
+
+function setLoopDist(mi) {
+  STATE.set('loopDist', +mi);
+  $('l-slider').value = mi;
+  // Highlight matching chip
+  $$('#l-chips .chip').forEach(c => c.classList.toggle('active', +c.dataset.val === +mi));
+  updateDistDisplay();
+}
+
+// ── GPS HANDLER ───────────────────────────────────────────
+async function handleGPS(inputId) {
+  const input = $(inputId);
+  const orig  = input.placeholder;
+  input.placeholder = 'Getting your location…';
+  try {
+    const [lng, lat] = await API.geolocate();
+    const r = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json` +
+      `?access_token=${STATE.get('token')}&limit=1&types=address,neighborhood`
+    );
+    const d    = await r.json();
+    const label = d.features?.[0]?.place_name ?? `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    // Lock the coords directly — no re-geocoding needed
+    Autocomplete.setFromGPS(inputId, [lng, lat], label);
+    // Place pin on map
+    const pinType = inputId.includes('dest') ? 'd' : 'o';
+    if (MapGL.ready) MapGL.pin([lng, lat], pinType);
+  } catch (e) {
+    const pref = inputId.startsWith('d') ? 'd' : 'l';
+    UI.showErr(pref, e.message);
+  } finally {
+    input.placeholder = orig;
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  AUTOCOMPLETE MODULE — with zip code support
+// ════════════════════════════════════════════════════════
+const Autocomplete = (() => {
+  const locked  = {};
+  const timers  = {};
+  const cursors = {};
+  // Flat list aligned to rendered clickable items (excludes section headers)
+  const featureMaps = {};
+
+  const TYPE_ICON = {
+    address:'📍', poi:'⭐', neighborhood:'🏘',
+    place:'🏙', postcode:'📮', locality:'🏙', region:'🗺',
+  };
+
+  // NYC zip → neighbourhood name for friendly display
+  const ZIP_NAMES = {
+    '10001':'Chelsea / Penn Station','10002':'Lower East Side','10003':'East Village',
+    '10004':'Financial District','10005':'Financial District','10006':'Financial District',
+    '10007':'Tribeca / City Hall','10009':'East Village','10010':'Gramercy / Flatiron',
+    '10011':'Chelsea','10012':'SoHo / NoHo','10013':'Tribeca / SoHo','10014':'West Village',
+    '10016':'Murray Hill / Kips Bay','10017':'Midtown East','10018':'Midtown West / Garment',
+    '10019':'Midtown West / Hell's Kitchen','10020':'Rockefeller Center','10021':'Upper East Side',
+    '10022':'Midtown East / Sutton','10023':'Upper West Side','10024':'Upper West Side',
+    '10025':'Upper West Side / Morningside','10026':'Harlem','10027':'Harlem / Morningside Hts',
+    '10028':'Upper East Side','10029':'East Harlem / Yorkville','10030':'Harlem',
+    '10031':'Hamilton Heights','10032':'Washington Heights','10033':'Washington Heights',
+    '10034':'Inwood','10035':'East Harlem','10036':'Hell's Kitchen / Times Sq',
+    '10037':'Harlem','10038':'South Street Seaport','10039':'Harlem',
+    '10040':'Inwood / Fort George','10044':'Roosevelt Island',
+    '10065':'Upper East Side / Lenox Hill','10069':'Upper West Side',
+    '10075':'Upper East Side','10128':'Upper East Side / Carnegie Hill',
+    '10280':'Battery Park City','10282':'Battery Park City',
+    '11201':'Brooklyn Heights / DUMBO','11203':'East Flatbush','11204':'Borough Park',
+    '11205':'Fort Greene / Clinton Hill','11206':'Williamsburg / Bushwick',
+    '11207':'East New York','11208':'East New York','11209':'Bay Ridge',
+    '11210':'Flatbush','11211':'Williamsburg','11212':'Brownsville',
+    '11213':'Crown Heights','11214':'Bensonhurst','11215':'Park Slope / Windsor Terrace',
+    '11216':'Crown Heights / Bed-Stuy','11217':'Boerum Hill / Park Slope',
+    '11218':'Kensington / Windsor Terrace','11219':'Borough Park / Sunset Park',
+    '11220':'Sunset Park','11221':'Bushwick / Bed-Stuy','11222':'Greenpoint',
+    '11223':'Gravesend / Bensonhurst','11224':'Coney Island','11225':'Prospect-Lefferts Gardens',
+    '11226':'Flatbush / Ditmas Park','11228':'Bay Ridge / Dyker Heights',
+    '11229':'Sheepshead Bay / Marine Park','11230':'Midwood','11231':'Red Hook / Carroll Gardens',
+    '11232':'Sunset Park','11233':'Bed-Stuy','11234':'Marine Park / Flatlands',
+    '11235':'Brighton Beach / Sheepshead Bay','11236':'Canarsie','11237':'Bushwick',
+    '11238':'Prospect Heights / Crown Heights','11239':'Georgetown / Bergen Beach',
+    '11249':'Williamsburg North','10451':'South Bronx','10452':'High Bridge',
+    '10453':'Morris Heights','10454':'Mott Haven','10455':'Mott Haven / Melrose',
+    '10456':'Morrisania','10457':'East Tremont','10458':'Fordham / Belmont',
+    '10459':'Longwood','10460':'West Farms','10461':'Westchester Sq',
+    '10462':'Parkchester / Bronx River','10463':'Kingsbridge / Riverdale',
+    '10464':'City Island','10465':'Throggs Neck','10466':'Wakefield / Edenwald',
+    '10467':'Norwood / Williamsbridge','10468':'University Heights',
+    '10469':'Pelham Parkway','10470':'Wakefield','10471':'Riverdale',
+    '10472':'Soundview','10473':'Soundview / Castle Hill','10474':'Hunts Point',
+    '10475':'Co-op City','11004':'Glen Oaks','11101':'Long Island City',
+    '11102':'Astoria','11103':'Astoria','11104':'Sunnyside','11105':'Astoria / Ditmars',
+    '11106':'Astoria','11354':'Flushing','11355':'Flushing','11356':'College Point',
+    '11357':'Whitestone','11358':'Fresh Meadows','11360':'Bayside','11361':'Bayside',
+    '11362':'Little Neck / Douglaston','11363':'Little Neck','11364':'Oakland Gardens',
+    '11365':'Fresh Meadows','11366':'Fresh Meadows','11367':'Kew Gardens Hills',
+    '11368':'Corona','11369':'East Elmhurst','11370':'East Elmhurst',
+    '11371':'LaGuardia Airport Area','11372':'Jackson Heights','11373':'Elmhurst',
+    '11374':'Rego Park','11375':'Forest Hills','11377':'Woodside','11378':'Maspeth',
+    '11379':'Middle Village','11385':'Ridgewood / Glendale','11411':'Cambria Heights',
+    '11413':'Springfield Gardens','11414':'Howard Beach','11415':'Kew Gardens',
+    '11416':'Ozone Park','11417':'Ozone Park / Woodhaven','11418':'Richmond Hill',
+    '11419':'South Richmond Hill','11420':'South Ozone Park','11421':'Woodhaven',
+    '11422':'Rosedale','11423':'Hollis','11424':'Jamaica','11425':'Jamaica',
+    '11426':'Bellerose','11427':'Queens Village','11428':'Queens Village',
+    '11429':'Queens Village','11430':'JFK Airport Area','11432':'Jamaica',
+    '11433':'Jamaica','11434':'Jamaica / South Jamaica','11435':'Jamaica / Briarwood',
+    '11436':'Jamaica / South Ozone Park','11691':'Far Rockaway',
+    '11692':'Arverne / Edgemere','11693':'Far Rockaway / Rockaway Park',
+    '11694':'Rockaway Park / Belle Harbor','11697':'Breezy Point',
+  };
+
+  // Detect if query looks like a zip code (5 digits)
+  const isZipQuery = q => /^\d{5}$/.test(q.trim());
+  const isPartialZip = q => /^\d{3,4}$/.test(q.trim());
+
+  // anchor: [lng, lat] of the other field — suggestions sorted by distance from it
+  async function getSuggestions(query, anchor = null) {
+    if (query.length < 2) return [];
+    const token = STATE.get('token');
+    if (!token) return [];
+
+    const q = query.trim();
+
+    // Partial zip — instant local match, no API needed
+    if (isPartialZip(q)) return getLocalZipMatches(q);
+
+    // Use the other field's coordinates as proximity so results are
+    // ordered by distance from the already-chosen point, not city center.
+    // Falls back to Manhattan center if nothing is locked yet.
+    const prox = anchor
+      ? `${anchor[0]},${anchor[1]}`
+      : '-73.9857,40.7484';
+
+    const types = isZipQuery(q)
+      ? 'postcode,neighborhood,place'
+      : 'address,poi,neighborhood,place,locality,postcode';
+
+    // No bbox — don't hard-restrict to NYC. Proximity sorts NYC results
+    // to the top while still showing other cities as fallback options.
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
+      `?access_token=${token}&autocomplete=true&limit=6` +
+      `&proximity=${prox}` +
+      `&types=${types}`;
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return [];
+      const d = await r.json();
+      const features = d.features || [];
+      if (isZipQuery(q)) features.sort((a,b) => (a.place_type[0]==='postcode'?-1:1));
+      return features;
+    } catch { return []; }
+  }
+
+  // Return synthetic Mapbox-shaped features from local zip table
+  function getLocalZipMatches(partialZip) {
+    return Object.entries(ZIP_NAMES)
+      .filter(([zip]) => zip.startsWith(partialZip))
+      .slice(0, 6)
+      .map(([zip, name]) => ({
+        _localZip: true,
+        place_name: `${zip} — ${name}, New York, NY`,
+        place_type: ['postcode'],
+        text: zip,
+        context: [{ id:'region.NY', text:'New York' }],
+        center: null, // will be resolved on select
+        properties: { short_code: zip },
+      }));
+  }
+
+  // Resolve a local zip entry to coordinates via Mapbox
+  async function resolveZip(zip) {
+    const token = STATE.get('token');
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${zip}%20New%20York%20NY.json` +
+      `?access_token=${token}&types=postcode&country=US&limit=1`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    const d = await r.json();
+    return d.features?.[0]?.center || null;
+  }
+
+  function render(inputId, features) {
+    const dd = document.getElementById(`${inputId}-ac`);
+    if (!dd) return;
+    cursors[inputId] = -1;
+    if (!features.length) { dd.classList.remove('open'); dd.innerHTML = ''; return; }
+
+    // Separate into sections: Zip codes first, then places
+    const zips   = features.filter(f => f.place_type?.[0] === 'postcode');
+    const places = features.filter(f => f.place_type?.[0] !== 'postcode');
+
+    // Build flat clickable list aligned to feature indices
+    const clickable = []; // {feature, idx}
+    let html = '';
+
+    if (zips.length) {
+      html += `<div class="ac-section">Zip codes</div>`;
+      zips.forEach(f => {
+        const idx = features.indexOf(f);
+        clickable.push({ feature: f, idx });
+        const zip  = f.text || f.place_name.split(' ')[0];
+        const name = ZIP_NAMES[zip] || f.place_name.split(',').slice(1,3).join(',').trim();
+        html += `<div class="ac-item" data-clickidx="${clickable.length-1}">
+          <span class="ac-icon">📮</span>
+          <span class="ac-text">
+            <span class="ac-name">${name || f.place_name.split(',')[0]}</span>
+            <span class="ac-sub">${f.place_name.split(',').slice(1,3).join(',').trim()}</span>
+          </span>
+          <span class="ac-zip-badge">${zip}</span>
+        </div>`;
+      });
+    }
+
+    if (places.length) {
+      if (zips.length) html += `<div class="ac-section">Places</div>`;
+      places.forEach(f => {
+        const idx = features.indexOf(f);
+        clickable.push({ feature: f, idx });
+        const parts     = f.place_name.split(',');
+        const primary   = parts[0];
+        const secondary = parts.slice(1, 3).join(',').trim();
+        const icon      = TYPE_ICON[f.place_type?.[0]] || '📍';
+        html += `<div class="ac-item" data-clickidx="${clickable.length-1}">
+          <span class="ac-icon">${icon}</span>
+          <span class="ac-text">
+            <span class="ac-name">${primary}</span>
+            ${secondary ? `<span class="ac-sub">${secondary}</span>` : ''}
+          </span>
+        </div>`;
+      });
+    }
+
+    featureMaps[inputId] = clickable;
+    dd.innerHTML = html;
+    dd.classList.add('open');
+
+    dd.querySelectorAll('.ac-item').forEach(item => {
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        const ci = +item.dataset.clickidx;
+        const entry = featureMaps[inputId]?.[ci];
+        if (entry) select(inputId, entry.feature);
+      });
+    });
+  }
+
+  async function select(inputId, feature) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    let coords = feature.center;
+    let label  = feature.place_name;
+
+    // Local zip entry — resolve coordinates first
+    if (feature._localZip || !coords) {
+      const zip = feature.text || feature.place_name.split(' ')[0].replace('—','').trim();
+      input.value = `Resolving ${zip}…`;
+      coords = await resolveZip(zip);
+      if (!coords) { input.value = ''; return; }
+      const name = ZIP_NAMES[zip] || zip;
+      label = `${zip} — ${name}, New York, NY`;
+    }
+
+    locked[inputId] = coords;
+    input.value = label;
+    input.classList.add('ac-locked');
+    const dot = document.getElementById(`${inputId}-dot`);
+    if (dot) dot.classList.add('on');
+    const dd = document.getElementById(`${inputId}-ac`);
+    if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+    if (MapGL.ready) {
+      const pinType = inputId.includes('dest') ? 'd' : 'o';
+      MapGL.pin(coords, pinType);
+    }
+  }
+
+  function handleKey(inputId, features, e) {
+    const dd = document.getElementById(`${inputId}-ac`);
+    if (!dd?.classList.contains('open')) return;
+    const items = [...dd.querySelectorAll('.ac-item')];
+    let c = cursors[inputId] ?? -1;
+    if (e.key === 'ArrowDown') { e.preventDefault(); c = Math.min(c+1, items.length-1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); c = Math.max(c-1, -1); }
+    else if (e.key === 'Enter') {
+      if (c >= 0) {
+        const ci    = +items[c].dataset.clickidx;
+        const entry = featureMaps[inputId]?.[ci];
+        if (entry) { e.stopPropagation(); select(inputId, entry.feature); return; }
+      }
+      dd.classList.remove('open'); return;
+    } else if (e.key === 'Escape') { dd.classList.remove('open'); cursors[inputId] = -1; return; }
+    cursors[inputId] = c;
+    items.forEach((el, i) => el.classList.toggle('selected', i === c));
+  }
+
+  function wire(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    let currentFeatures = [];
+
+    input.addEventListener('input', () => {
+      locked[inputId] = null;
+      input.classList.remove('ac-locked');
+      const dot = document.getElementById(`${inputId}-dot`);
+      if (dot) dot.classList.remove('on');
+      const q = input.value.trim();
+      clearTimeout(timers[inputId]);
+      if (q.length < 2) {
+        const dd = document.getElementById(`${inputId}-ac`);
+        if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+        currentFeatures = [];
+        return;
+      }
+      // Use the other field's locked coords as proximity anchor so
+      // "400 East 72nd" ranks the NYC result closest to origin first.
+      const anchor = getAnchorFor(inputId);
+
+      // Zip matches are instant — no debounce
+      if (isPartialZip(q) || isZipQuery(q)) {
+        getSuggestions(q, anchor).then(f => { currentFeatures = f; render(inputId, f); });
+        return;
+      }
+      timers[inputId] = setTimeout(async () => {
+        currentFeatures = await getSuggestions(q, anchor);
+        render(inputId, currentFeatures);
+      }, 280);
+    });
+
+    input.addEventListener('keydown', e => handleKey(inputId, currentFeatures, e));
+
+    input.addEventListener('blur', () => {
+      setTimeout(() => {
+        const dd = document.getElementById(`${inputId}-ac`);
+        if (dd) dd.classList.remove('open');
+      }, 180);
+    });
+  }
+
+  function getCoords(inputId) { return locked[inputId] || null; }
+
+  // Return the locked coords of the paired field as a proximity anchor.
+  // d-origin ↔ d-dest, l-origin has no pair (loop uses single point).
+  function getAnchorFor(inputId) {
+    if (inputId === 'd-origin') return locked['d-dest']   || null;
+    if (inputId === 'd-dest')   return locked['d-origin'] || null;
+    return null; // l-origin has no counterpart
+  }
+
+  function setFromGPS(inputId, coords, label) {
+    locked[inputId] = coords;
+    const input = document.getElementById(inputId);
+    if (input) { input.value = label; input.classList.add('ac-locked'); }
+    const dot = document.getElementById(`${inputId}-dot`);
+    if (dot) dot.classList.add('on');
+  }
+
+  return { wire, getCoords, setFromGPS };
+})();
+
+// ── INIT ──────────────────────────────────────────────────
+async function boot() {
+  const token = await API.getToken();
+  STATE.set('token', token);
+  await MapGL.init(token);
+
+  // Restore last-used tab
+  const savedTab = localStorage.getItem('yugen_tab') || 'dest';
+  UI.switchTab(savedTab);
+
+  // 4. Wire tabs
+  $$('.tab').forEach(t =>
+    t.addEventListener('click', () => UI.switchTab(t.dataset.tab))
+  );
+
+  // 5. Wire mode buttons (both features)
+  $('d-modes').addEventListener('click', e => {
+    const btn = e.target.closest('.mbtn');
+    if (btn) UI.setMode($('d-modes'), btn);
+  });
+  $('l-modes').addEventListener('click', e => {
+    const btn = e.target.closest('.mbtn');
+    if (btn) UI.setMode($('l-modes'), btn);
+  });
+
+  // 6. Wire vibe cards (both features)
+  $('d-vibes').addEventListener('click', e => {
+    const btn = e.target.closest('.vibe');
+    if (btn) UI.setVibe($('d-vibes'), btn);
+  });
+  $('l-vibes').addEventListener('click', e => {
+    const btn = e.target.closest('.vibe');
+    if (btn) UI.setVibe($('l-vibes'), btn);
+  });
+
+  // 7. Wire fine-tune accordions
+  $('d-tune-row').addEventListener('click', () => UI.toggleAccordion($('d-sliders'), $('d-caret')));
+  $('l-tune-row').addEventListener('click', () => UI.toggleAccordion($('l-sliders'), $('l-caret')));
+
+  // 8. Wire slider display updates
+  [['d-sn','d-vn'],['d-sa','d-va'],['d-sw','d-vw'],['d-se','d-ve'],['d-sq','d-vq'],
+   ['l-sn','l-vn'],['l-sa','l-va'],['l-sw','l-vw'],['l-se','l-ve'],['l-sq','l-vq']].forEach(([sl, lbl]) => {
+    const el = $(sl);
+    if (el) el.addEventListener('input', () => {
+      $(lbl).textContent = el.value;
+      // Deselect vibe preset when user manually adjusts
+      const prefix = sl.startsWith('d') ? 'd' : 'l';
+      $$(`#${prefix === 'd' ? 'd' : 'l'}-vibes .vibe`).forEach(v => v.classList.remove('active'));
+    });
+  });
+
+  // 9. Wire loop distance slider
+  $('l-slider').addEventListener('input', e => setLoopDist(e.target.value));
+
+  // 10. Wire distance chips
+  $('l-chips').addEventListener('click', e => {
+    const chip = e.target.closest('.chip');
+    if (chip) setLoopDist(chip.dataset.val);
+  });
+
+  // 11. Wire unit toggle
+  ['unit-mi', 'unit-km'].forEach(id => {
+    $(id).addEventListener('click', () => {
+      STATE.set('unit', id === 'unit-mi' ? 'mi' : 'km');
+      $$('.unit-btn').forEach(b => b.classList.toggle('active', b.id === id));
+      updateDistDisplay();
+    });
+  });
+
+  // 11b. Wire autocomplete on all address inputs
+  ['d-origin', 'd-dest', 'l-origin'].forEach(id => Autocomplete.wire(id));
+
+  // 12. Wire GPS buttons
+  $('d-gps').addEventListener('click', () => handleGPS('d-origin'));
+  $('l-gps').addEventListener('click', () => handleGPS('l-origin'));
+
+  // 13. Wire generate buttons
+  $('d-btn').addEventListener('click', () => Destination.go());
+  $('l-btn').addEventListener('click', () => Loop.go());
+
+  // 14. Wire retry loop button
+  $('l-retry').addEventListener('click', () => Loop.go(true));
+
+  // 15. Enter key on route inputs — only when autocomplete is closed
+  ['d-origin', 'd-dest'].forEach(id =>
+    $(id).addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      const dd = $(`${id}-ac`);
+      if (dd?.classList.contains('open')) return; // autocomplete handles it
+      Destination.go();
+    })
+  );
+  $('l-origin').addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const dd = $('l-origin-ac');
+    if (dd?.classList.contains('open')) return;
+    Loop.go();
+  });
+
+  // 16. Init distance display
+  updateDistDisplay();
+}
+
+// Start
+boot().catch(console.error);
+</script>
+</body>
+</html>

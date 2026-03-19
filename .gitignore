@@ -1,0 +1,6 @@
+node_modules/
+.env
+data/nyc-trees-cache.json
+data/nyc-bike-routes.geojson
+.claude/
+yugen.html
