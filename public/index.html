@@ -708,18 +708,24 @@ const MapGL = (() => {
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new mapboxgl.ScaleControl(), 'bottom-right');
     return new Promise((res) => {
-      map.on('load', () => {
+      function dismiss() {
+        if (ready) return;
         ready = true;
+        map.resize();
         $('map-init').classList.add('gone');
         res();
-      });
+      }
+      map.on('load',       dismiss);
+      map.on('idle',       dismiss);
+      map.on('style.load', dismiss);
+      // Hard fallback: force-dismiss after 6s regardless
+      setTimeout(dismiss, 6000);
       map.on('error', e => {
         console.error('[Mapbox error]', e);
         if (e.error?.status === 401 || e.error?.status === 403) {
           showMapError('Mapbox token is invalid or expired. Update CONFIG.MAPBOX_FALLBACK.');
         }
-        // Non-auth errors are non-fatal — resolve so the UI keeps working
-        if (!ready) { ready = true; $('map-init').classList.add('gone'); res(); }
+        dismiss();
       });
     });
   }
