@@ -629,7 +629,7 @@ input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15) }
 
 // ── CONFIG ───────────────────────────────────────────────
 const CONFIG = {
-  MAPBOX_FALLBACK: '',
+  MAPBOX_FALLBACK: 'pk.eyJ1IjoiYXNjMjgiLCJhIjoiY21tb2loc3dlMGU3bjJ5b2VocGlhaWs1dyJ9.vl07YxZt8fqcI0Pf_u9Sdg',
   BACKEND: 'http://localhost:3001',   // ← swap to ngrok URL when sharing
   OSRM_BASE: 'https://router.project-osrm.org/route/v1', // free, no key needed
   ROUTE_TIMEOUT: 18000,
@@ -1751,9 +1751,15 @@ const Autocomplete = (() => {
 
 // ── INIT ──────────────────────────────────────────────────
 async function boot() {
-  const token = await API.getToken();
-  STATE.set('token', token);
-  await MapGL.init(token);
+  // ── FIX: Start map immediately with fallback token.
+  // Don't wait for the backend — that 3s timeout was blocking the map.
+  // Token fetch runs in parallel; result is stored in STATE for API calls.
+  MapGL.init(CONFIG.MAPBOX_FALLBACK);
+  STATE.set('token', CONFIG.MAPBOX_FALLBACK);
+
+  // Backend token fetch in background — updates STATE when it resolves.
+  // Map is already initialised, so this only affects geocoding/API calls.
+  API.getToken().then(token => STATE.set('token', token));
 
   // Restore last-used tab
   const savedTab = localStorage.getItem('yugen_tab') || 'dest';
