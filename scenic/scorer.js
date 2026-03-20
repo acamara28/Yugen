@@ -2,10 +2,13 @@ import { overpassFetch } from '../routing/overpass-queue.js';
 import { scoreBikeInfrastructure, detectGreenways, loadBikeLanes } from '../routing/bike-lanes.js';
 import { scoreTreeCanopy, detectNotableSpecies, loadTrees } from '../routing/trees.js';
 import { scoreRouteVisually, detectionsToHighlights } from './mapillary.js';
+import { getDb } from '../db/client.js';
 
-const SEARCH_RADIUS = 400; // metres
+const SEARCH_RADIUS    = 400; // metres
+const MONGO_MULTIPLIER = 1.3; // human-verified locations score 30% higher
 
 const scoreCache = new Map();
+const mongoCache = new Map(); // separate cache for MongoDB results
 
 // ── Seasonal multipliers ──────────────────────────────────────
 // Parks and nature score higher in spring/autumn (peak beauty).
@@ -38,7 +41,12 @@ export async function scoreRoute(coords, userWeights = {}, mapillaryToken = null
   if (scoreCache.has(cacheKey)) {
     features = scoreCache.get(cacheKey);
   } else {
-    features = await queryOverpass(bbox);
+    // Fetch Overpass and MongoDB in parallel
+    const [overpass, mongo] = await Promise.all([
+      queryOverpass(bbox),
+      queryMongoLocations(bbox),
+    ]);
+    features = mergeFeatures(overpass, mongo);
     scoreCache.set(cacheKey, features);
     setTimeout(() => scoreCache.delete(cacheKey), 60 * 60 * 1000);
   }
@@ -149,6 +157,91 @@ async function queryOverpass(bbox) {
   }
 }
 
+// ── MongoDB locations query ───────────────────────────────────
+// Returns locations within the bbox, grouped by category.
+// Results are cached for 30 minutes — location data rarely changes.
+export async function queryMongoLocations(bbox) {
+  const key = bboxToKey(bbox);
+  if (mongoCache.has(key)) return mongoCache.get(key);
+
+  try {
+    const db  = await getDb();
+    const col = db.collection('locations');
+
+    const docs = await col.find({
+      coordinates: {
+        $geoWithin: {
+          $box: [
+            [bbox.west,  bbox.south],
+            [bbox.east,  bbox.north],
+          ],
+        },
+      },
+    }).toArray();
+
+    // Group into the same shape as Overpass features, tagged as mongo-verified
+    const result = {
+      parks:    [],
+      water:    [],
+      historic: [],
+      paths:    [],
+      trees:    [],
+      art:      [],
+      quiet:    [],
+      mongo:    docs,   // raw docs available for description/highlights
+      totalCount: docs.length,
+    };
+
+    for (const doc of docs) {
+      const point   = doc.coordinates.coordinates; // [lng, lat]
+      const entry   = { point, name: doc.name, scenicScore: doc.scenicScore, mongo: true };
+
+      switch (doc.category) {
+        case 'park':
+        case 'nature_reserve':
+        case 'garden':
+          result.parks.push(entry);
+          break;
+        case 'waterway':
+          result.water.push(entry);
+          break;
+        case 'viewpoint':
+        case 'landmark':
+        case 'monument':
+          result.historic.push(entry);
+          break;
+        default:
+          result.parks.push(entry);
+      }
+    }
+
+    mongoCache.set(key, result);
+    setTimeout(() => mongoCache.delete(key), 30 * 60 * 1000);
+    console.log(`[MongoDB] ${docs.length} locations loaded for bbox`);
+    return result;
+
+  } catch (err) {
+    console.error('[MongoDB] queryMongoLocations error:', err.message);
+    return { parks: [], water: [], historic: [], paths: [], trees: [], art: [], quiet: [], mongo: [], totalCount: 0 };
+  }
+}
+
+// ── Merge Overpass + MongoDB features ────────────────────────
+// MongoDB entries are flagged so computeScores can apply the multiplier.
+function mergeFeatures(overpass, mongo) {
+  return {
+    parks:      [...overpass.parks,    ...mongo.parks],
+    water:      [...overpass.water,    ...mongo.water],
+    historic:   [...overpass.historic, ...mongo.historic],
+    paths:      [...overpass.paths,    ...mongo.paths],
+    trees:      [...overpass.trees,    ...mongo.trees],
+    art:        [...overpass.art,      ...mongo.art],
+    quiet:      [...overpass.quiet,    ...mongo.quiet],
+    mongo:      mongo.mongo ?? [],
+    totalCount: overpass.totalCount + mongo.totalCount,
+  };
+}
+
 // ── Feature categorization ────────────────────────────────────
 function categorizeFeatures(elements) {
   const f = { parks: [], water: [], historic: [], paths: [], trees: [], art: [], quiet: [], totalCount: elements.length };
@@ -191,37 +284,70 @@ function categorizeFeatures(elements) {
 }
 
 // ── Compute per-category scores ───────────────────────────────
+// MongoDB-verified locations (f.mongo === true) get a 1.3x hit weight.
 function computeScores(routeCoords, features) {
   if (!routeCoords.length) return { nature: 0, architecture: 0, water: 0, quiet: 0 };
 
-  const sampleEvery   = Math.max(1, Math.floor(routeCoords.length / 50));
-  const sampled       = routeCoords.filter((_, i) => i % sampleEvery === 0);
-  const r             = SEARCH_RADIUS / 111320;
-  const rTree         = (SEARCH_RADIUS * 0.5) / 111320; // tighter radius for trees
+  const sampleEvery = Math.max(1, Math.floor(routeCoords.length / 50));
+  const sampled     = routeCoords.filter((_, i) => i % sampleEvery === 0);
+  const r           = SEARCH_RADIUS / 111320;
+  const rTree       = (SEARCH_RADIUS * 0.5) / 111320;
 
-  let natureHits = 0, waterHits = 0, archHits = 0, quietHits = 0;
+  // Returns hit weight: 1.3 for mongo-verified, 1.0 for Overpass
+  function hitWeight(f) { return f.mongo ? MONGO_MULTIPLIER : 1.0; }
+
+  let natureScore = 0, waterScore = 0, archScore = 0, quietHits = 0;
 
   for (const coord of sampled) {
-    const nearPark = features.parks.some(f => distance(coord, f.point) < r);
-    const nearTree = features.trees.some(f => distance(coord, f.point) < rTree);
-    if (nearPark || nearTree) natureHits++;
-    if (features.water.some(f => distance(coord, f.point) < r * 1.5)) waterHits++;
-    if (features.historic.some(f => distance(coord, f.point) < r) ||
-        features.art.some(f => distance(coord, f.point) < rTree)) archHits++;
-    if (features.quiet.some(f => distance(coord, f.point) < r) ||
-        features.paths.some(f => {
-          const t = f.tags;
-          return distance(coord, f.point) < rTree &&
-            (t.highway === 'cycleway' || t.highway === 'path' || t.highway === 'footway' || t.bicycle === 'designated');
-        })) quietHits++;
+    // Nature — parks and trees, weighted by source
+    let bestNature = 0;
+    for (const f of features.parks) {
+      if (distance(coord, f.point) < r)
+        bestNature = Math.max(bestNature, hitWeight(f));
+    }
+    for (const f of features.trees) {
+      if (distance(coord, f.point) < rTree)
+        bestNature = Math.max(bestNature, hitWeight(f) * 0.8);
+    }
+    natureScore += bestNature;
+
+    // Water — wider search radius
+    let bestWater = 0;
+    for (const f of features.water) {
+      if (distance(coord, f.point) < r * 1.5)
+        bestWater = Math.max(bestWater, hitWeight(f));
+    }
+    waterScore += bestWater;
+
+    // Architecture — historic sites and art
+    let bestArch = 0;
+    for (const f of features.historic) {
+      if (distance(coord, f.point) < r)
+        bestArch = Math.max(bestArch, hitWeight(f));
+    }
+    for (const f of features.art) {
+      if (distance(coord, f.point) < rTree)
+        bestArch = Math.max(bestArch, hitWeight(f) * 0.8);
+    }
+    archScore += bestArch;
+
+    // Quiet — binary (no multiplier needed, Overpass-only)
+    const nearQuiet = features.quiet.some(f => distance(coord, f.point) < r);
+    const nearPath  = features.paths.some(f => {
+      const t = f.tags || {};
+      return distance(coord, f.point) < rTree &&
+        (t.highway === 'cycleway' || t.highway === 'path' ||
+         t.highway === 'footway'  || t.bicycle === 'designated');
+    });
+    if (nearQuiet || nearPath) quietHits++;
   }
 
   const total = sampled.length;
   return {
-    nature:       Math.min(1, (natureHits / total) * 1.4),
-    water:        Math.min(1, (waterHits  / total) * 2.0),
-    architecture: Math.min(1, (archHits   / total) * 2.5),
-    quiet:        Math.min(1, (quietHits  / total) * 2.0),
+    nature:       Math.min(1, (natureScore / total) * 1.4),
+    water:        Math.min(1, (waterScore  / total) * 2.0),
+    architecture: Math.min(1, (archScore   / total) * 2.5),
+    quiet:        Math.min(1, (quietHits   / total) * 2.0),
   };
 }
 
@@ -376,9 +502,22 @@ export function adaptiveScenicWeight(distanceMeters, userWeights = {}) {
 }
 
 // ── Flat features for A* vision rays ─────────────────────────
+// MongoDB locations included so the A* algorithm is pulled toward
+// human-verified scenic spots as well as OSM features.
 export async function fetchFeaturesFlat(bbox) {
-  const c = await queryOverpass(bbox);
-  return [...c.parks, ...c.water, ...c.historic, ...c.paths, ...c.trees, ...c.art];
+  const [overpass, mongo] = await Promise.all([
+    queryOverpass(bbox),
+    queryMongoLocations(bbox),
+  ]);
+  const merged = mergeFeatures(overpass, mongo);
+  return [
+    ...merged.parks,
+    ...merged.water,
+    ...merged.historic,
+    ...merged.paths,
+    ...merged.trees,
+    ...merged.art,
+  ];
 }
 
 // ── Helpers ───────────────────────────────────────────────────
