@@ -1,6 +1,8 @@
 import { overpassFetch } from './overpass-queue.js';
 import { buildGraph } from '../scenic/panoramic-astar.js';
 import { getBikeLaneScore, loadBikeLanes } from './bike-lanes.js';
+import { getDb } from '../db/client.js';
+import { estimateScoreFromFeatures } from '../scenic/feature-matcher.js';
 
 
 // ── Highway filter by mode ────────────────────────────────────
@@ -100,6 +102,15 @@ export async function fetchGraph(bbox, mode = 'walk') {
     applyBikeLaneBonuses(graph);
   }
 
+  // Feature-matcher estimate: soft boost for ALL segments based on
+  // OSM tag similarity to known scenic locations in MongoDB.
+  // Runs before the direct-match boost so direct matches can stack on top.
+  await applyFeatureMatcherBoosts(graph, usableWays);
+
+  // Boost roadBonus for nodes near verified scenic MongoDB locations
+  // (direct spatial match — stronger and more precise than feature estimate)
+  await applyMongoLocationBoosts(graph, bbox);
+
   console.log(`[Graph] built: ${graph.nodes.size} nodes, ${usableWays.length} ways (${mode})`);
 
   graphCache.set(key, graph);
@@ -128,6 +139,117 @@ function attachRoadBonuses(graph, ways) {
       const key = `${node.id}-${edge.to}`;
       edge.roadBonus = edgeType.get(key) ?? 0;
     }
+  }
+}
+
+// ── Feature-matcher background boost ─────────────────────────
+// Estimates a scenic score for every road segment from OSM tags alone,
+// using dot-product similarity against MongoDB locations that have known
+// feature vectors. Applied at half the strength of a direct MongoDB match
+// so spatial proximity always wins when it's available.
+async function applyFeatureMatcherBoosts(graph, usableWays) {
+  try {
+    // Build nodeId → OSM tags map (first way a node appears in wins)
+    const nodeTags = new Map();
+    for (const way of usableWays) {
+      const tags = way.tags || {};
+      for (const nodeId of way.nodes) {
+        if (!nodeTags.has(nodeId)) nodeTags.set(nodeId, tags);
+      }
+    }
+
+    // Cache estimates by a compact key of the tags that matter.
+    // All nodes sharing the same highway/landuse/natural profile get the
+    // same estimate — avoids redundant async calls per node.
+    const estimateCache = new Map();
+
+    function tagKey(tags) {
+      return [
+        tags.highway   ?? '',
+        tags.landuse   ?? '',
+        tags.natural   ?? '',
+        tags.leisure   ?? '',
+        tags.waterway  ?? '',
+        tags.surface   ?? '',
+        tags.tourism   ?? '',
+      ].join('|');
+    }
+
+    let boosted = 0;
+
+    for (const [nodeId, node] of graph.nodes) {
+      const tags = nodeTags.get(nodeId) ?? {};
+      const key  = tagKey(tags);
+
+      let estimate;
+      if (estimateCache.has(key)) {
+        estimate = estimateCache.get(key);
+      } else {
+        // No nearby Overpass features at this stage — enrichment happens
+        // in scorer.js later. Tags alone are sufficient for a background estimate.
+        estimate = await estimateScoreFromFeatures(tags, []);
+        estimateCache.set(key, estimate);
+      }
+
+      if (estimate == null) continue;
+
+      // Convert 0–10 scenic score to a roadBonus boost capped at 0.15.
+      // Direct MongoDB spatial matches add up to 0.30, so they always dominate.
+      const boost = (estimate / 10) * 0.15;
+      for (const edge of node.edges) {
+        edge.roadBonus = Math.min(0.98, (edge.roadBonus ?? 0) + boost);
+      }
+      boosted++;
+    }
+
+    console.log(
+      `[Graph] feature-matcher: ${estimateCache.size} tag profiles → ${boosted} nodes boosted`
+    );
+  } catch (err) {
+    // Non-fatal — routing still works without the feature-matcher boost
+    console.warn('[Graph] feature-matcher skipped:', err.message);
+  }
+}
+
+// ── Boost nodes near high-scoring MongoDB locations ───────────
+async function applyMongoLocationBoosts(graph, bbox) {
+  try {
+    const db  = await getDb();
+    const col = db.collection('locations');
+
+    const locations = await col.find({
+      scenicScore: { $gt: 7.5 },
+      coordinates: {
+        $geoWithin: {
+          $box: [
+            [bbox.west, bbox.south],
+            [bbox.east, bbox.north],
+          ],
+        },
+      },
+    }, { projection: { coordinates: 1, scenicScore: 1 } }).toArray();
+
+    if (locations.length === 0) return;
+
+    let boosted = 0;
+    for (const [, node] of graph.nodes) {
+      for (const loc of locations) {
+        const [locLng, locLat] = loc.coordinates.coordinates;
+        const dist = haversine(node.lat, node.lng, locLat, locLng);
+        if (dist <= 300) {
+          const boost = (loc.scenicScore / 10) * 0.3;
+          for (const edge of node.edges) {
+            edge.roadBonus = Math.min(0.98, (edge.roadBonus ?? 0) + boost);
+          }
+          boosted++;
+          break; // one boost per node (nearest location already applied)
+        }
+      }
+    }
+    console.log(`[Graph] MongoDB boost: ${locations.length} locations → ${boosted} nodes boosted`);
+  } catch (err) {
+    // Non-fatal — routing still works without MongoDB boost
+    console.warn('[Graph] MongoDB boost skipped:', err.message);
   }
 }
 

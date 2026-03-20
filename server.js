@@ -11,6 +11,7 @@ import { scenicAStar } from './scenic/panoramic-astar.js';
 import { loadBikeLanes, bikeLaneStats } from './routing/bike-lanes.js';
 import { loadTrees, treeStats } from './routing/trees.js';
 import { ensureIndexes, insertLocation } from './db/locations.js';
+import { getDb } from './db/client.js';
 
 const app       = express();
 const PORT      = process.env.PORT || 3001;
@@ -442,6 +443,80 @@ app.post('/admin/location', adminAuth, async (req, res) => {
     res.json({ ok: true, id });
   } catch (err) {
     console.error('[Admin] Save error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/feedback ────────────────────────────────────
+app.post('/api/feedback', async (req, res) => {
+  const { coords, rating, highlight } = req.body;
+  if (!Array.isArray(coords) || !coords.length)
+    return res.status(400).json({ error: 'coords array required' });
+  if (!rating || rating < 1 || rating > 5)
+    return res.status(400).json({ error: 'rating must be 1–5' });
+
+  try {
+    const db = await getDb();
+
+    // 1. Persist raw feedback
+    await db.collection('feedback').insertOne({
+      coords,
+      rating:    +rating,
+      highlight: highlight || '',
+      createdAt: new Date(),
+    });
+
+    // 2. Bounding box around all route coords (+400m pad)
+    const lngs = coords.map(c => c[0]);
+    const lats  = coords.map(c => c[1]);
+    const pad   = 400 / 111320;
+    const locations = await db.collection('locations').find({
+      coordinates: {
+        $geoWithin: {
+          $box: [
+            [Math.min(...lngs) - pad, Math.min(...lats) - pad],
+            [Math.max(...lngs) + pad, Math.max(...lats) + pad],
+          ],
+        },
+      },
+    }).toArray();
+
+    // 3. Filter to those actually within 400m of any route coord & update scores
+    // Rating 1-5 → scenic score 0-10
+    const ratingScore = (+rating / 5) * 10;
+    const updates = [];
+
+    for (const loc of locations) {
+      const [locLng, locLat] = loc.coordinates.coordinates;
+      const near = coords.some(([lng, lat]) => haversine(lat, lng, locLat, locLng) <= 400);
+      if (!near) continue;
+
+      const oldCount = loc.feedbackCount || 0;
+      const newCount = oldCount + 1;
+      const newScore = (loc.scenicScore * oldCount + ratingScore) / newCount;
+      // +0.05 confidence per feedback, capped at 1.0; reliable after 20
+      const newConf  = Math.min(1.0, (loc.confidence || 0.5) + 0.05);
+
+      updates.push(
+        db.collection('locations').updateOne(
+          { _id: loc._id },
+          { $set: {
+            scenicScore:   +newScore.toFixed(2),
+            confidence:    +newConf.toFixed(2),
+            feedbackCount: newCount,
+            reliable:      newCount >= 20,
+            updatedAt:     new Date(),
+          }},
+        )
+      );
+    }
+
+    await Promise.all(updates);
+    console.log(`[Feedback] rating:${rating}/5 — ${updates.length} locations updated`);
+    res.json({ ok: true, locationsUpdated: updates.length });
+
+  } catch (err) {
+    console.error('[Feedback error]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
