@@ -10,6 +10,7 @@ import { fetchGraph, nearestNode, pathToGeoJSON, pathDistance, estimateDuration,
 import { scenicAStar } from './scenic/panoramic-astar.js';
 import { loadBikeLanes, bikeLaneStats } from './routing/bike-lanes.js';
 import { loadTrees, treeStats } from './routing/trees.js';
+import { ensureIndexes, insertLocation } from './db/locations.js';
 
 const app       = express();
 const PORT      = process.env.PORT || 3001;
@@ -247,6 +248,204 @@ app.post('/api/scenic-route', async (req, res) => {
   }
 });
 
+// ── Admin auth middleware ─────────────────────────────────────
+function adminAuth(req, res, next) {
+  const pwd = process.env.ADMIN_PASSWORD;
+  if (!pwd) return res.status(500).send('ADMIN_PASSWORD not set in .env');
+  if (req.query.pwd !== pwd) return res.status(401).send('Unauthorized');
+  next();
+}
+
+// ── GET /admin ────────────────────────────────────────────────
+app.get('/admin', adminAuth, (req, res) => {
+  const mapboxToken = process.env.MAPBOX_TOKEN || '';
+  const pwd         = req.query.pwd;
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yugen — Admin</title>
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+  body { font-family: system-ui, sans-serif; display: flex; height: 100vh; background: #f5f5f5 }
+  #map { flex: 1; height: 100% }
+  #panel {
+    width: 340px; min-width: 340px; height: 100%; background: #fff;
+    border-left: 1px solid #e0e0e0; display: flex; flex-direction: column;
+    padding: 24px; gap: 14px; overflow-y: auto;
+  }
+  h2 { font-size: 18px; font-weight: 600; color: #1a1a2e; margin-bottom: 4px }
+  .hint { font-size: 12px; color: #999; margin-bottom: 8px }
+  label { font-size: 12px; font-weight: 500; color: #555; display: block; margin-bottom: 4px }
+  input, select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 13px; color: #222; background: #fafafa; outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #8b7fc7; background: #fff }
+  textarea { resize: vertical; min-height: 72px }
+  .coords { font-size: 12px; color: #8b7fc7; font-weight: 500; min-height: 18px }
+  button {
+    width: 100%; padding: 11px; background: #8b7fc7; color: #fff;
+    border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
+    cursor: pointer; margin-top: 4px;
+  }
+  button:hover { background: #7a6eb8 }
+  button:disabled { background: #bbb; cursor: not-allowed }
+  #status { font-size: 13px; text-align: center; min-height: 20px; font-weight: 500 }
+  #status.ok  { color: #2e7d32 }
+  #status.err { color: #c62828 }
+  .field { display: flex; flex-direction: column; gap: 4px }
+  .score-row { display: flex; align-items: center; gap: 10px }
+  .score-row input[type=range] { flex: 1 }
+  .score-val { font-size: 14px; font-weight: 700; color: #8b7fc7; width: 28px; text-align: right }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <div>
+    <h2>📍 Add Location</h2>
+    <p class="hint">Click the map to drop a pin, fill in details, then save.</p>
+  </div>
+  <div class="coords" id="coords">No pin dropped yet — click the map</div>
+  <div class="field">
+    <label>Name</label>
+    <input id="name" type="text" placeholder="e.g. Conservatory Garden" />
+  </div>
+  <div class="field">
+    <label>Category</label>
+    <select id="category">
+      <option value="park">Park</option>
+      <option value="nature_reserve">Nature Reserve</option>
+      <option value="garden">Garden</option>
+      <option value="viewpoint">Viewpoint</option>
+      <option value="waterway">Waterway</option>
+      <option value="monument">Monument / Memorial</option>
+      <option value="landmark">Landmark / Historic Site</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>Scenic Score</label>
+    <div class="score-row">
+      <input id="score" type="range" min="1" max="10" step="0.5" value="7.5"
+             oninput="document.getElementById('scoreVal').textContent=this.value" />
+      <span class="score-val" id="scoreVal">7.5</span>
+    </div>
+  </div>
+  <div class="field">
+    <label>Notes / Description</label>
+    <textarea id="notes" placeholder="What makes this place special?"></textarea>
+  </div>
+  <button id="saveBtn" disabled onclick="save()">Drop a pin first</button>
+  <div id="status"></div>
+</div>
+
+<script>
+  mapboxgl.accessToken = '${mapboxToken}';
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/outdoors-v12',
+    center: [-73.9857, 40.7484],
+    zoom: 12,
+  });
+  map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
+
+  let marker = null;
+  let lngLat = null;
+
+  map.on('click', e => {
+    lngLat = e.lngLat;
+    if (marker) marker.remove();
+    marker = new mapboxgl.Marker({ color: '#8b7fc7' })
+      .setLngLat(lngLat)
+      .addTo(map);
+    document.getElementById('coords').textContent =
+      'Pin: ' + lngLat.lat.toFixed(6) + ', ' + lngLat.lng.toFixed(6);
+    const btn = document.getElementById('saveBtn');
+    btn.disabled = false;
+    btn.textContent = 'Save Location';
+  });
+
+  async function save() {
+    const name = document.getElementById('name').value.trim();
+    if (!name) { setStatus('Enter a name first.', 'err'); return; }
+
+    const btn = document.getElementById('saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    setStatus('', '');
+
+    const body = {
+      name,
+      lng:         lngLat.lng,
+      lat:         lngLat.lat,
+      category:    document.getElementById('category').value,
+      scenicScore: parseFloat(document.getElementById('score').value),
+      description: document.getElementById('notes').value.trim(),
+    };
+
+    try {
+      const res = await fetch('/admin/location?pwd=${pwd}', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      setStatus('✓ Saved — ' + name, 'ok');
+      // Reset form but keep map position
+      document.getElementById('name').value    = '';
+      document.getElementById('notes').value   = '';
+      document.getElementById('score').value   = '7.5';
+      document.getElementById('scoreVal').textContent = '7.5';
+      if (marker) { marker.remove(); marker = null; lngLat = null; }
+      document.getElementById('coords').textContent = 'No pin dropped yet — click the map';
+      btn.disabled = true;
+      btn.textContent = 'Drop a pin first';
+    } catch (err) {
+      setStatus('✗ ' + err.message, 'err');
+      btn.disabled = false;
+      btn.textContent = 'Save Location';
+    }
+  }
+
+  function setStatus(msg, cls) {
+    const el = document.getElementById('status');
+    el.textContent  = msg;
+    el.className    = cls;
+  }
+</script>
+</body>
+</html>`);
+});
+
+// ── POST /admin/location ──────────────────────────────────────
+app.post('/admin/location', adminAuth, async (req, res) => {
+  const { name, lng, lat, category, scenicScore, description } = req.body;
+  if (!name || lng == null || lat == null || !category)
+    return res.status(400).json({ error: 'name, lng, lat, and category are required' });
+  if (scenicScore < 1 || scenicScore > 10)
+    return res.status(400).json({ error: 'scenicScore must be between 1 and 10' });
+  try {
+    const id = await insertLocation({
+      name, lng, lat, category,
+      scenicScore: +scenicScore,
+      confidence:  1.0,
+      source:      'manual',
+      description: description || '',
+      tags:        [category, 'manual'],
+    });
+    console.log(`[Admin] Saved location: "${name}" (${category}) at ${lat},${lng}`);
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error('[Admin] Save error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Haversine (metres) ────────────────────────────────────────
 function haversine(lat1, lng1, lat2, lng2) {
   const R    = 6371000;
@@ -265,5 +464,11 @@ app.listen(PORT, () => {
   console.log(`   Health   → http://localhost:${PORT}/api/health`);
   console.log(`   Token    → ${process.env.MAPBOX_TOKEN    ? '✓ loaded' : '✗ missing — check .env'}`);
   console.log(`   Mapillary → ${process.env.MAPILLARY_TOKEN ? '✓ loaded' : '○ add to .env for visual scoring'}\n`);
-  setImmediate(() => { loadBikeLanes(); loadTrees(); });
+  setImmediate(() => {
+    loadBikeLanes();
+    loadTrees();
+    ensureIndexes()
+      .then(() => console.log('   MongoDB   → ✓ indexes ready'))
+      .catch(e  => console.warn('   MongoDB   → ✗', e.message));
+  });
 });
