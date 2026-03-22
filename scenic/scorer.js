@@ -194,7 +194,7 @@ export async function queryMongoLocations(bbox) {
 
     for (const doc of docs) {
       const point   = doc.coordinates.coordinates; // [lng, lat]
-      const entry   = { point, name: doc.name, scenicScore: doc.scenicScore, mongo: true };
+      const entry   = { point, name: doc.name, scenicScore: doc.scenicScore, mongo: true, tags: {} };
 
       switch (doc.category) {
         case 'park':
@@ -358,7 +358,7 @@ function generateDescription(features, scores, coords, greenways = [], treeSpeci
 
   // Nature
   const parkNames = [...new Set(
-    features.parks.filter(f => f.tags.name).map(f => f.tags.name).slice(0, 2)
+    features.parks.filter(f => f.tags?.name).map(f => f.tags.name).slice(0, 2)
   )];
   if (parkNames.length)
     parts.push(`passes ${parkNames.join(' and ')}`);
@@ -464,10 +464,10 @@ function inferHighlights(features, scores, greenways = [], treeSpecies = [], vis
   if (scores.nature > 0.6)       h.push('🏞 Park passage');
   if (scores.water  > 0.6)       h.push('🌊 River views');
   if (scores.quiet  > 0.5)       h.push('🔇 Quiet streets');
-  const hasViewpoint = features.historic.some(f => f.tags.tourism === 'viewpoint');
-  const hasRiver     = features.water.some(f => f.tags.waterway === 'river');
-  const hasNatureRes = features.parks.some(f => f.tags.leisure === 'nature_reserve');
-  const hasCycleway  = features.paths.some(f => f.tags.highway === 'cycleway' || f.tags.bicycle === 'designated');
+  const hasViewpoint = features.historic.some(f => f.tags?.tourism === 'viewpoint');
+  const hasRiver     = features.water.some(f => f.tags?.waterway === 'river');
+  const hasNatureRes = features.parks.some(f => f.tags?.leisure === 'nature_reserve');
+  const hasCycleway  = features.paths.some(f => f.tags?.highway === 'cycleway' || f.tags?.bicycle === 'designated');
   const hasMonument  = features.historic.some(f => f.tags.historic === 'monument');
   const hasArtwork   = features.art.length > 0;
   const hasTrees     = features.trees.length > 10;
